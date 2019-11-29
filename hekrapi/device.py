@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+"""Device class module for Hekr API"""
 from typing import Union
 
 from enum import IntEnum
@@ -12,138 +14,218 @@ from .exceptions import (
     DeviceProtocolNotSetException,
     HeartbeatFailedException,
     LocalAuthenticationFailedException,
-    CommandFailedException
+    CloudAuthenticationFailedException,
+    CommandFailedException,
+    DeviceConnectionMissingException,
+    AuthenticationFailedException
 )
 from .const import (
-    DEFAULT_APPLICATION_ID, ACTION_AUTHENTICATE
+    DEFAULT_APPLICATION_ID,
+    ACTION_AUTHENTICATE,
+    DEFAULT_DEVICE_PORT
 )
 
 
-def device_id_from_mac_address(mac_address: Union[str, bytearray]):
+def device_id_from_mac_address(mac_address: Union[str, bytearray]) -> str:
+    """Convert mac address to device ID
+
+    Arguments:
+        mac_address {Union[str, bytearray]} -- MAC-address string (dashed format)
+
+    Returns:
+        str -- Device ID
+    """
     if isinstance(mac_address, bytearray):
         mac_address = mac_address.hex()
 
-    for ch in [':', '-', ' ']:
-        mac_address = mac_address.replace(ch, '')
+    for delimiter in [':', '-', ' ']:
+        mac_address = mac_address.replace(delimiter, '')
 
     mac_address = mac_address.upper()
     return 'ESP_2M_' + mac_address
 
 
 class DeviceConnectionType(IntEnum):
+    """Connection types for devices"""
     NONE = 0
     LOCAL = 1
     CLOUD = 2
 
 
-class Device(object):
-    def __init__(
-        self, device_id, control_key,
-        account=None,
-        host=None, port=10000,
-        application_id=DEFAULT_APPLICATION_ID,
-        protocol: Union['Protocol', type(None)] = None
-    ):
+class Device:
+    """Device class for Hekr API"""
+
+    def __init__(self,
+                 device_id: str,
+                 control_key: str,
+                 account: Union['Account', type(None)]=None,
+                 host: Union[str, type(None)]=None,
+                 port: int = DEFAULT_DEVICE_PORT,
+                 application_id: str = DEFAULT_APPLICATION_ID,
+                 protocol: Union['Protocol', type(None)]=None
+                 ):
         self.device_id = device_id
-        self.host = host
-        self.port = port
+        self.local_address = (host, port)
         self.account = account
-        self.application_id = application_id
         self.protocol = protocol
+        self.application_id = application_id
         self.local_socket = None
 
-        self.local_frame_number = 0
+        self.local_message_id = 0
 
         self.__local_authenticated = False
         self.__control_key = control_key
 
     @property
-    def connection_type(self):
-        """ Retrieve best connection type for request functions """
-        # @TODO: check for more stuff to determine connection type
-        if self.host and self.port and self.__control_key:
-            return DeviceConnectionType.LOCAL
-        elif self.account:
-            return DeviceConnectionType.CLOUD
-        else:
-            return DeviceConnectionType.NONE
+    def available_connection_type(self) -> DeviceConnectionType:
+        """Retrieve best available connection type for communication
 
-    def set_control_key(self, control_key):
+        Returns:
+            DeviceConnectionType -- Available connection type
+        """
+        # @TODO: check for more stuff to determine connection type
+        if self.local_address and self.__control_key:
+            return DeviceConnectionType.LOCAL
+        if self.account:
+            return DeviceConnectionType.CLOUD
+
+        return DeviceConnectionType.NONE
+
+    def set_control_key(self, control_key: str):
+        """Sets device control key
+
+        Arguments:
+            control_key {str} -- Control key
+        """
         self.__control_key = control_key
 
     def open_socket_local(self):
+        """Opens local socket to device"""
         sock = socket(AF_INET, SOCK_DGRAM)
-        sock.connect((self.host, self.port))
+        sock.connect(self.local_address)
         sock.settimeout(5)
         # sock.setblocking(0)
         self.local_socket = sock
 
-    def make_request_local(
-            self, action: str, params: dict = {}, frame_number: int = None):
-        # @TODO: message IDs should be carried across all instances by definition
-        if not self.__local_authenticated and action != ACTION_AUTHENTICATE:
-            self.authenticate_local()
+    def make_request(self, action: str, params: dict = None,
+                     message_id: int = None,
+                     frame_number: int = None,
+                     connection_type: DeviceConnectionType = None):
+        """Make device request
 
-        if self.local_socket is None:
-            self.open_socket_local()
+        Arguments:
+            action {str} -- Action string
 
-        if frame_number is None:
-            self.local_frame_number += 1
-            frame_number = self.local_frame_number
+        Keyword Arguments:
+            params {dict} -- Request parameters (default: {None})
+            message_id {int} -- Message ID (default: {None})
+            frame_number {int} -- Frame number (default: {None})
+            connection_type {DeviceConnectionType} -- Connection type (default: {None})
 
-        request_dict = {
-            "msgId": frame_number,
-            "action": action,
-        }
-        if params:
-            request_dict["params"] = {
-                "devTid": self.device_id,
-                "ctrlKey": self.__control_key
+        Returns:
+            dict -- Request response
+        """
+        connection_type = connection_type or self.available_connection_type
+
+        if connection_type == DeviceConnectionType.LOCAL:
+            # @TODO: message IDs should be carried across all instances by definition
+            if not self.__local_authenticated and action != ACTION_AUTHENTICATE:
+                self.authenticate(connection_type=DeviceConnectionType.LOCAL)
+
+            if self.local_socket is None:
+                self.open_socket_local()
+
+            if message_id is None:
+                self.local_message_id += 1
+                message_id = self.local_message_id
+
+            if frame_number is None:
+                frame_number = 1
+
+            request_dict = {
+                "msgId": message_id,
+                "action": action,
+                "params": {
+                    "ctrlKey": self.__control_key,
+                    "devTid": self.device_id
+                }
             }
-            request_dict["params"].update(params)
+            if params:
+                request_dict["params"].update(params)
 
-        self.local_socket.send(dumps(request_dict).encode('utf-8'))
-        return self.read_response_local()
+            self.local_socket.send(dumps(request_dict).encode('utf-8'))
 
-    def read_response_local(self, length: int = 256):
-        received_data = self.local_socket.recv(length)
-        # @TODO: exceptions for nothingness
-        return loads(received_data)
+            return self.read_response(connection_type=connection_type)
 
-    def make_request_cloud(
-            self, action: str, params: dict = {}, message_id: int = None):
-        pass
+        if connection_type == DeviceConnectionType.CLOUD:
+            # @TODO: not implemented
+            return False
 
-    def read_response_cloud(self, length: int = 256):
-        pass
+        raise DeviceConnectionMissingException(self)
 
-    def make_request(self, action: str, params: dict = {},
-                     message_id: int = None):
-        if self.connection_type == DeviceConnectionType.LOCAL:
-            return self.make_request_local(action=action, params=params)
-        elif self.connection_type == DeviceConnectionType.CLOUD:
-            return self.make_request_cloud(action=action, params=params)
-        elif self.connection_type == DeviceConnectionType.NONE:
-            raise Exception(
-                'Cannot make requests to device until connection parameters are provided')
+    def read_response(self, length: int = 256, connection_type: DeviceConnectionType = None):
+        """Read device response
 
-    def read_response(self, length: int = 256):
-        if self.connection_type == DeviceConnectionType.LOCAL:
-            return self.read_response_local(length=length)
-        elif self.connection_type == DeviceConnectionType.CLOUD:
-            return self.read_response_cloud(length=length)
-        elif self.connection_type == DeviceConnectionType.NONE:
-            return Exception(
-                'Cannot read responses from device until connection parameters are provided')
+        Keyword Arguments:
+            length {int} -- Message length to expect (default: {256})
+            connection_type {DeviceConnectionType} -- Connection type to use (default: {None})
 
-    def heartbeat(self):
-        response = self.make_request(action='heartbeat', params=False)
+        Returns:
+            dict -- JSON-decoded dictionary of values
+        """
+        connection_type = connection_type or self.available_connection_type
+
+        if connection_type == DeviceConnectionType.LOCAL:
+            received_data = self.local_socket.recv(length)
+
+            # @TODO: exceptions for nothingness
+            return loads(received_data)
+
+        if connection_type == DeviceConnectionType.CLOUD:
+            # @TODO: not implemented
+            pass
+
+        return DeviceConnectionMissingException(self)
+
+    def heartbeat(self, connection_type: DeviceConnectionType = None):
+        """Send heartbeat message
+
+        Keyword Arguments:
+            connection_type {DeviceConnectionType} -- Connection type to use (default: {None})
+
+        Raises:
+            HeartbeatFailedException: Heartbeat message sending failed
+        """
+        response = self.make_request(
+            action='heartbeat',
+            params=False,
+            connection_type=connection_type)
 
         if response.get("code", None) != 200:
             raise HeartbeatFailedException(self, response)
 
-    def command(self, command: Union[int, str,
-                                     Command], data={}, return_decoded=True):
+    def command(self,
+                command: Union[int, str, Command],
+                data: dict = None,
+                return_decoded=True):
+        """Execute device command and return response
+
+        Arguments:
+            command {Union[int, str, Command]} -- Command ID/name/object to use
+
+        Keyword Arguments:
+            data {dict} -- Data values for datagram (default: {None})
+            return_decoded {bool} -- Extract and decode datagram from response (default: {True})
+
+        Raises:
+            DeviceProtocolNotSetException: Device does not have a protocol set
+            CommandFailedException: Command failed to execute due to device code error
+            CommandFailedException: Command failed to execute due to missing datagram
+            CommandFailedException: Command failed to execute due to socket timeout
+
+        Returns:
+            dict -- decoded datagram values or full response dictionary
+        """
         if not isinstance(command, Command):
             if self.protocol:
                 command = self.protocol.get_command(command)
@@ -172,42 +254,51 @@ class Device(object):
 
         try:
             response = self.read_response(512)
-        except SocketTimeout:
-            #_LOGGER.debug('socket timeout for command %s', command)
-            return None
 
-        if return_decoded:
-            datagram = response.get(
-                'params',
-                {}).get(
-                'data',
-                {}).get(
-                'raw',
-                None)
+            if return_decoded:
+                datagram = (response
+                            .get('params', {})
+                            .get('data', {})
+                            .get('raw', None)
+                            )
 
-            if datagram:
+                if not datagram:
+                    raise CommandFailedException(
+                        command, self, response, reason='Datagram not found')
+
                 return self.protocol.decode(datagram)
-            else:
-                raise CommandFailedException(
-                    command, self, response, reason='Datagram not found')
 
-        else:
             return response
 
-        # @TODO: warning! difficult to research into data frames, the device works so far like this: send(02)->receive(02)->receive(01)->
+        except SocketTimeout:
+            raise CommandFailedException(
+                command, self, response, reason='Socket timeout')
 
-    def authenticate_local(self):
-        response = self.make_request_local(action=ACTION_AUTHENTICATE)
+    def authenticate(self, connection_type: DeviceConnectionType = None):
+        """Authenticate with the device
 
-        if response.get("code", None) != 200:
-            #_LOGGER.error('Could not login locally to ' + self.device_id + ", response: " + str(response))
-            raise LocalAuthenticationFailedException(self)
+        Keyword Arguments:
+            connection_type {DeviceConnectionType} -- Connection type to use (default: {None})
 
-        self.__local_authenticated = True
+        Raises:
+            LocalAuthenticationFailedException: Local authentication failed
+            AuthenticationFailedException: Authentication failed
+        """
+        connection_type = connection_type or self.available_connection_type
 
-    def authenticate(self):
-        if self.connection_type == DeviceConnectionType.LOCAL:
-            return self.authenticate_local()
-        else:
-            # @TODO: research into authentication
-            return False
+        if connection_type == DeviceConnectionType.LOCAL:
+            response = self.make_request(
+                action=ACTION_AUTHENTICATE,
+                connection_type=connection_type)
+
+            if response.get("code", None) != 200:
+                raise LocalAuthenticationFailedException(self, response)
+
+            self.__local_authenticated = True
+            return True
+
+        elif connection_type == DeviceConnectionType.CLOUD:
+            raise CloudAuthenticationFailedException(self)
+
+        # @TODO: research into authentication
+        raise AuthenticationFailedException(self)

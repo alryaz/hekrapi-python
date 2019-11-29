@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+"""Datagram encoding/decoding module for HekrAPI"""
+
 from typing import Union, Tuple
 
 from .exceptions import (
@@ -7,18 +10,32 @@ from .exceptions import (
     InvalidMessageFrameTypeException,
     InvalidDataMissingKeyException
 )
+from .const import FRAME_START_IDENTIFICATION
 
-"""First character of every presumably valid raw datagram"""
-FRAME_START_IDENTIFICATION = 0x48
-
-
-def decode(protocol: 'Protocol',
-           raw: Union[bytearray,
-                      str],
+def decode(protocol: 'Protocol', raw: Union[bytearray, str],
            use_variable_names=False,
-           filter_values=True) -> Tuple['Command',
-                                        dict,
-                                        int]:
+           filter_values=True
+           ) -> Tuple['Command', dict, int]:
+    """Decode raw Hekr datagram
+
+    Arguments:
+        protocol {[type]} -- [description]
+        raw {Union[bytearray, str]} -- [description]
+
+    Keyword Arguments:
+        use_variable_names {bool} -- Use variable names when decoding (default: {False})
+        filter_values {bool} -- Apply multiplication and typecasting to values (default: {True})
+
+    Raises:
+        TypeError: Invalid type provided as function argument
+        InvalidMessagePrefixException: Datagram prefix does not match expected
+        InvalidMessageLengthException: Datagram length does not match expected
+        InvalidMessageChecksumException: Datagram checksum does not match expected
+        InvalidMessageFrameTypeException: Datagram frame type does not match expected
+
+    Returns:
+        dict -- Dictionary of decoded values
+    """
     if isinstance(raw, str):
         decoded = bytearray.fromhex(raw)
     elif isinstance(raw, bytearray):
@@ -66,9 +83,28 @@ def decode(protocol: 'Protocol',
 
     return (command, data, frame_number)
 
-
-def encode(command: 'Command', data: dict = {}, frame_number: int = 1,
+def encode(command: 'Command', data: dict = None, frame_number: int = 1,
            use_variable_names=False, filter_values=True) -> str:
+    """Encode raw Hekr datagram
+
+    Arguments:
+        command {[type]} -- Command to use arguments from
+
+    Keyword Arguments:
+        data {dict} -- Dictionary of decoded values (default: {None})
+        frame_number {int} -- Datagram frame number (default: {1})
+        use_variable_names {bool} -- Use variable names when encoding (default: {False})
+        filter_values {bool} -- Apply multiplication and typecasting (default: {True})
+
+    Raises:
+        InvalidDataMissingKeyException: [description]
+
+    Returns:
+        str -- [description]
+    """
+    if data is None:
+        data = {}
+
     raw = bytearray()
     raw.append(FRAME_START_IDENTIFICATION)
     raw.append(command.frame_type)

@@ -6,18 +6,22 @@ from aiohttp import ClientSession
 
 from .device import Device
 from .const import DEFAULT_APPLICATION_ID
-from .exceptions import AccountUnauthenticatedException
+from .exceptions import AccountUnauthenticatedException, AccountDevicesUpdateFailedException
 
 
 class Account:
     """Account class for HekrAPI
+
+    Raises:
+        ValueError: Account constructor is not provided possible ways to authenticate
+        AccountUnauthenticatedException: Account did not authenticate prior to calling method
 
     Attributes:
         __username (str): Account username
         __password (str, optional): Account password (not required with token)
         __token (str, optional): Authentication 'Bearer' token (not required with password)
         __devices (dict): Dictionary with 'Device' objects belonging to account
-        application_id (str): Application ID
+        application_id (str): Application ID (has default value)
     """
 
     BASE_URL = 'https://user-openapi.hekreu.me'
@@ -40,14 +44,26 @@ class Account:
 
     @property
     def devices(self):
-        """Devices array accessor"""
+        """Device dictionary accessor
+
+        Returns:
+            dict -- dictionary of devices (device_id => Device object)
+        """
         return self.__devices
 
     def authenticate(self):
         """Authenticate account with Hekr"""
 
     async def update_devices(self):
-        """Fetch devices from account"""
+        """Update devices for account
+
+        Raises:
+            AccountUnauthenticatedException: [description]
+
+        Returns:
+            int -- New devices found (that do not exist within the __devices attribute)
+        """
+
         if not self.__token:
             raise AccountUnauthenticatedException()
 
@@ -56,9 +72,10 @@ class Account:
         request_devices = 20
         current_page = 0
 
+        new_devices = {}
+
         async with ClientSession() as session:
             more_devices = True
-            found_devices = {}
             while more_devices:
                 request_url = base_url_devices.format(
                     request_devices,
@@ -69,20 +86,29 @@ class Account:
                         request_url,
                         headers={'Authorization': 'Bearer ' + self.__token}
                 ) as response:
-                    devices_list = await response.json()
-                    more_devices = (len(devices_list) == request_devices)
+                    response_json = await response.json()
 
-                    for device_attributes in devices_list:
-                        if device_attributes['devTid'] in self.__devices:
-                            self.__devices[device_attributes['devTid']].set_control_key(
+                    if response.status != 200:
+                        session.close()
+                        raise AccountDevicesUpdateFailedException(self, response)
+
+                    more_devices = (len(response_json) == request_devices)
+
+                    for device_attributes in response_json:
+                        device_id = device_attributes['devTid']
+
+                        if device_id in self.__devices:
+                            self.__devices[device_id].set_control_key(
                                 device_attributes['ctrlKey'])
                         else:
-                            found_devices[device_attributes['devTid']] = Device(
-                                device_id=device_attributes['devTid'],
+                            new_devices[device_id] = Device(
+                                device_id=device_id,
                                 control_key=device_attributes['ctrlKey'],
                                 host=device_attributes['lanIp'],
                                 application_id=self.application_id
                             )
 
-            if found_devices:
-                self.__devices.update(found_devices)
+            if new_devices:
+                self.__devices.update(new_devices)
+
+        return len(new_devices)

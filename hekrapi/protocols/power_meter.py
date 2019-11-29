@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+""" Basic protocol definition for a smart power meter """
 from enum import IntEnum
 
 from ..protocol import Protocol
@@ -14,48 +15,52 @@ __all__ = [
 
 
 class VoltageWarning(IntEnum):
+    """ Voltage warning status """
     OK = 0
     OVERVOLTAGE = 1
     UNDERVOLTAGE = 2
 
 
 class CurrentWarning(IntEnum):
+    """ Current warning status """
     OK = 0
     CRITICAL = 1
 
 
 class PowerSupplyWarning(IntEnum):
+    """ Backup power supply warning status """
     OK = 0
     INSUFFICIENT = 1
 
 
 class SwitchState(IntEnum):
+    """ Current state of device """
     ON = 0
     OFF = 1
     FAILURE = 2
 
 
-to_float = (int, float)
-to_bool = (int, bool)
-to_str = (int, str)
+TO_FLOAT = (int, float)
+TO_BOOL = (int, bool)
+TO_STR = (int, str)
 
 PROTOCOL = Protocol(
     Command(
         1, "reportDev", FrameType.RECEIVE,
         Argument("phase_count", int, 1, "type"),
-        Argument("switch_state", to_bool, 1, "sw"),
+        Argument("switch_state", TO_BOOL, 1, "sw"),
         Argument(
             "total_energy_consumed",
-            to_float,
+            TO_FLOAT,
             4,
             "total_Energy",
             multiplier=0.01),
         Argument("warning_voltage", VoltageWarning, 1, "fault_Over_U"),
-        Argument("current_energy_consumption", to_float, 3,
+        Argument("current_energy_consumption", TO_FLOAT, 3,
                  "total_Active_power", multiplier=0.0001),
         Argument("warning_current", CurrentWarning, 1, "fault_Over_I"),
-        Argument("delay_timer", int, 2, "tmCd_M", min=0, max=1440),
-        Argument("delay_enabled", to_bool, 1, "tmCdO_Sw"),
+        Argument("delay_timer", int, 2, "tmCd_M", value_min=0, value_max=1440),
+        Argument("delay_enabled", TO_BOOL, 1, "tmCdO_Sw"),
         Argument(
             "warning_battery",
             PowerSupplyWarning,
@@ -67,90 +72,90 @@ PROTOCOL = Protocol(
         3, "setLimit", FrameType.SEND,
         Argument(
             "max_current",
-            to_float,
+            TO_FLOAT,
             2,
             "top_I",
             multiplier=0.01,
-            min=0,
-            max=120),
-        Argument("max_voltage", int, 2, "top_U", min=0, max=500),
-        Argument("min_voltage", int, 2, "low_U", min=0, max=500),
+            value_min=0,
+            value_max=120),
+        Argument("max_voltage", int, 2, "top_U", value_min=0, value_max=500),
+        Argument("min_voltage", int, 2, "low_U", value_min=0, value_max=500),
     ),
     # 4th command unknown
     Command(
         5, "clear", FrameType.SEND,
         Argument(
             "active_energy_import",
-            to_float,
+            TO_FLOAT,
             4,
             "import_Active_Energy",
             multiplier=0.01,
-            min=0,
-            max=999999.99),
+            value_min=0,
+            value_max=999999.99),
         Argument(
             "active_energy_export",
-            to_float,
+            TO_FLOAT,
             4,
             "export_Active_Energy",
             multiplier=0.01,
-            min=0,
-            max=999999.99),
+            value_min=0,
+            value_max=999999.99),
         Argument(
             "total_energy_consumed",
-            to_float,
+            TO_FLOAT,
             4,
             "total_Energy",
             multiplier=0.01,
-            min=0,
-            max=999999.99),
+            value_min=0,
+            value_max=999999.99),
     ),
     Command(6, "queryMeterID", FrameType.SEND),
     Command(
         7, "reportMeterID", FrameType.RECEIVE,
-        Argument("meter_id_1", to_str, 1, "meterID1"),
-        Argument("meter_id_2", to_str, 1, "meterID2"),
-        Argument("meter_id_3", to_str, 1, "meterID3"),
-        Argument("meter_id_4", to_str, 1, "meterID4"),
-        Argument("meter_id_5", to_str, 1, "meterID5"),
-        Argument("meter_id_6", to_str, 1, "meterID6"),
+        Argument("meter_id_1", TO_STR, 1, "meterID1"),
+        Argument("meter_id_2", TO_STR, 1, "meterID2"),
+        Argument("meter_id_3", TO_STR, 1, "meterID3"),
+        Argument("meter_id_4", TO_STR, 1, "meterID4"),
+        Argument("meter_id_5", TO_STR, 1, "meterID5"),
+        Argument("meter_id_6", TO_STR, 1, "meterID6"),
     ),
     Command(
         8, "reportSet", FrameType.RECEIVE,
         Argument(
             "max_current",
-            to_float,
+            TO_FLOAT,
             2,
             "top_I",
             multiplier=0.01,
-            min=0,
-            max=120),
-        Argument("max_voltage", int, 2, "top_U", min=0, max=500),
-        Argument("min_voltage", int, 2, "low_U", min=0, max=500),
+            value_min=0,
+            value_max=120),
+        Argument("max_voltage", int, 2, "top_U", value_min=0, value_max=500),
+        Argument("min_voltage", int, 2, "low_U", value_min=0, value_max=500),
         Argument(
             "option_electricity_purchase",
-            to_float,
+            TO_FLOAT,
             4,
             "purchaseElectricity",
             multiplier=0.01,
-            min=0,
-            max=999999.99),
+            value_min=0,
+            value_max=999999.99),
         Argument(
             "option_electricity_residual",
-            to_float,
+            TO_FLOAT,
             4,
             "residualElectricity",
             multiplier=0.01,
-            min=0,
-            max=999999.99),
+            value_min=0,
+            value_max=999999.99),
         Argument(
             "option_electricity_alarm",
-            to_float,
+            TO_FLOAT,
             4,
             "electricityAlarm_set",
             multiplier=0.01,
-            min=0,
-            max=999999.99),
-        Argument("option_prepaid_enabled", to_bool, 1, "prepaidFunctionSw")
+            value_min=0,
+            value_max=999999.99),
+        Argument("option_prepaid_enabled", TO_BOOL, 1, "prepaidFunctionSw")
     ),
     Command(
         9, "setSw", FrameType.SEND,
@@ -161,173 +166,172 @@ PROTOCOL = Protocol(
         11, "reportData", FrameType.RECEIVE,
         Argument(
             "current_1",
-            to_float,
+            TO_FLOAT,
             3,
             "I1",
             multiplier=0.001,
-            min=0,
-            max=999.999),
+            value_min=0,
+            value_max=999.999),
         Argument(
             "current_2",
-            to_float,
+            TO_FLOAT,
             3,
             "I2",
             multiplier=0.001,
-            min=0,
-            max=999.999),
+            value_min=0,
+            value_max=999.999),
         Argument(
             "current_3",
-            to_float,
+            TO_FLOAT,
             3,
             "I3",
             multiplier=0.001,
-            min=0,
-            max=999.999),
+            value_min=0,
+            value_max=999.999),
         Argument(
             "voltage_1",
-            to_float,
+            TO_FLOAT,
             2,
             "I1",
             multiplier=0.1,
-            min=0,
-            max=999.9),
+            value_min=0,
+            value_max=999.9),
         Argument(
             "voltage_2",
-            to_float,
+            TO_FLOAT,
             2,
             "I2",
             multiplier=0.1,
-            min=0,
-            max=999.9),
+            value_min=0,
+            value_max=999.9),
         Argument(
             "voltage_3",
-            to_float,
+            TO_FLOAT,
             2,
             "I3",
             multiplier=0.1,
-            min=0,
-            max=999.9),
-        # @TODO: next argument wtf description: When the parameter is greater than 1000000, a negative sign is displayed. Parameter = reported value-1000000 and then divided.
+            value_min=0,
+            value_max=999.9),
         Argument(
             "total_active_power",
-            to_float,
+            TO_FLOAT,
             3,
             "total_Reactive_Power",
             multiplier=0.0001,
-            min=0,
-            max=199.9999),
+            value_min=0,
+            value_max=199.9999),
         Argument(
             "active_power_1",
-            to_float,
+            TO_FLOAT,
             3,
             "active_Power1",
             multiplier=0.0001,
-            min=0,
-            max=199.9999),
+            value_min=0,
+            value_max=199.9999),
         Argument(
             "active_power_2",
-            to_float,
+            TO_FLOAT,
             3,
             "active_Power2",
             multiplier=0.0001,
-            min=0,
-            max=199.9999),
+            value_min=0,
+            value_max=199.9999),
         Argument(
             "active_power_3",
-            to_float,
+            TO_FLOAT,
             3,
             "active_Power3",
             multiplier=0.0001,
-            min=0,
-            max=199.9999),
+            value_min=0,
+            value_max=199.9999),
         Argument(
             "total_active_power",
-            to_float,
+            TO_FLOAT,
             3,
             "total_Active_Power",
             multiplier=0.0001,
-            min=0,
-            max=199.9999),
+            value_min=0,
+            value_max=199.9999),
         Argument(
             "active_power_1",
-            to_float,
+            TO_FLOAT,
             3,
             "active_Power1",
             multiplier=0.0001,
-            min=0,
-            max=199.9999),
+            value_min=0,
+            value_max=199.9999),
         Argument(
             "active_power_2",
-            to_float,
+            TO_FLOAT,
             3,
             "active_Power2",
             multiplier=0.0001,
-            min=0,
-            max=199.9999),
+            value_min=0,
+            value_max=199.9999),
         Argument(
             "active_power_3",
-            to_float,
+            TO_FLOAT,
             3,
             "active_Power3",
             multiplier=0.0001,
-            min=0,
-            max=199.9999),
+            value_min=0,
+            value_max=199.9999),
         Argument(
             "total_power_factor",
-            to_float,
+            TO_FLOAT,
             2,
             "total_Constant",
             multiplier=0.0001,
-            min=0,
-            max=199.9999),
+            value_min=0,
+            value_max=199.9999),
         Argument(
             "power_factor_1",
-            to_float,
+            TO_FLOAT,
             2,
             "constant1",
             multiplier=0.001,
-            min=0,
-            max=9.999),
+            value_min=0,
+            value_max=9.999),
         Argument(
             "power_factor_2",
-            to_float,
+            TO_FLOAT,
             2,
             "constant2",
             multiplier=0.001,
-            min=0,
-            max=9.999),
+            value_min=0,
+            value_max=9.999),
         Argument(
             "power_factor_3",
-            to_float,
+            TO_FLOAT,
             2,
             "constant3",
             multiplier=0.001,
-            min=0,
-            max=9.999),
+            value_min=0,
+            value_max=9.999),
         Argument(
             "current_frequency",
-            to_float,
+            TO_FLOAT,
             2,
             "rate",
             multiplier=0.01),
         # @TODO: min, max
         Argument(
             "total_energy_consumed",
-            to_float,
+            TO_FLOAT,
             4,
             "total_Energy",
             multiplier=0.01),
         # @TODO: min, max
         Argument(
             "active_energy_import",
-            to_float,
+            TO_FLOAT,
             4,
             "import_Active_Energy",
             multiplier=0.01),
         # @TODO: min, max
         Argument(
             "active_energy_export",
-            to_float,
+            TO_FLOAT,
             4,
             "export_Active_Energy",
             multiplier=0.01),
@@ -336,26 +340,26 @@ PROTOCOL = Protocol(
     Command(
         12, "setTmCmd", FrameType.SEND,
         Argument("delay_timer", int, 2, "tmCd_M"),  # @TODO: min, max
-        Argument("delay_enabled", to_bool, 1, "tmCdO_Sw")
+        Argument("delay_enabled", TO_BOOL, 1, "tmCdO_Sw")
     ),
     Command(
         13, "SetParameter", FrameType.SEND,
         Argument(
             "option_electricity_purchase",
-            to_float,
+            TO_FLOAT,
             4,
             "purchaseElectricity",
             multiplier=0.01,
-            min=0,
-            max=999999.99),
+            value_min=0,
+            value_max=999999.99),
         Argument(
             "option_electricity_alarm",
-            to_float,
+            TO_FLOAT,
             4,
             "electricityAlarm_set",
             multiplier=0.01,
-            min=0,
-            max=999999.99),
-        Argument("option_prepaid_enabled", to_bool, 1, "prepaidFunctionSw")
+            value_min=0,
+            value_max=999999.99),
+        Argument("option_prepaid_enabled", TO_BOOL, 1, "prepaidFunctionSw")
     )
 )
