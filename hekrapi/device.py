@@ -250,7 +250,7 @@ class Device:
         )
 
         if response.get("code", None) != 200:
-            raise CommandFailedException(command, self, response)
+            raise CommandFailedException(command=command, protocol=self, response=response)
 
         try:
             response = self.read_response(512)
@@ -264,7 +264,8 @@ class Device:
 
                 if not datagram:
                     raise CommandFailedException(
-                        command, self, response, reason='Datagram not found')
+                        command=command, protocol=self, response=response,
+                        reason='Datagram not found')
 
                 return self.protocol.decode(datagram)
 
@@ -272,7 +273,8 @@ class Device:
 
         except SocketTimeout:
             raise CommandFailedException(
-                command, self, response, reason='Socket timeout')
+                command=command, protocol=self, response=response,
+                reason='Socket timeout')
 
     def authenticate(self, connection_type: DeviceConnectionType = None):
         """Authenticate with the device

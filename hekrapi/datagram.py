@@ -116,7 +116,7 @@ def encode(command: 'Command', data: dict = None, frame_number: int = 1,
         value_input = data.get(key, None)
 
         if value_input is None:
-            raise InvalidDataMissingKeyException(key)
+            raise InvalidDataMissingKeyException(data_key=key)
 
         if filter_values:
             if argument.multiplier:

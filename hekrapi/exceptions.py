@@ -11,7 +11,7 @@ class HekrAPIException(Exception):
         kwargs['reason'] = kwargs.get('reason') or self.default_reason
         super().__init__(
             kwargs['reason'].format(
-                **kwargs) + ' (' + arguments_text + ')')
+                **kwargs) + (' (' + arguments_text + ')' if arguments_text else ''))
 
 
 class InvalidMessageException(HekrAPIException):
@@ -56,12 +56,12 @@ class CommandNotFoundException(HekrAPIException):
 
 class CommandFailedException(HekrAPIException):
     """Raised when command execution response contains an error"""
-    default_reason = "Could not execute command '{command}' on '{device.id}', response: {response}"
+    default_reason = "Could not execute command '{command}' on '{device.device_id}', response: {response}"
 
 
 class HeartbeatFailedException(HekrAPIException):
     """Raised when heartbeat command failed to execute"""
-    default_reason = "Could not execute heartbeat on '{device.id}', response: {response}"
+    default_reason = "Could not execute heartbeat on '{device.device_id}', response: {response}"
 
 
 class AuthenticationFailedException(HekrAPIException):
