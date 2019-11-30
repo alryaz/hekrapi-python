@@ -1,15 +1,16 @@
 from distutils.core import setup
+version = '0.0.4'
 setup(
-  name = 'hekrapi',         # How you named your package folder (MyLib)
-  packages = ['hekrapi', 'hekrapi.protocols'],   # Chose the same as "name"
-  version = '0.0.3',      # Start with a small number and increase it with every change you make
-  license='MIT',        # Chose a license from here: https://help.github.com/articles/licensing-a-repository
+  name = 'hekrapi',
+  packages = ['hekrapi', 'hekrapi.protocols'],
+  version = version,
+  license='MIT',
   description = 'Python Hekr IoT API bindings',
   author = 'Alexander Ryazanov',
   author_email = 'alryaz@xavux.com',
   url = 'https://github.com/alryaz/hekrapi-python',
-  download_url = 'https://github.com/alryaz/hekrapi-python/archive/0.0.1.tar.gz',
-  keywords = ['Hekr', 'API', 'Wisen', 'Smart Devices', 'IoT'],   # Keywords that define your package best
+  download_url = 'https://github.com/alryaz/hekrapi-python/archive/v' + version + '.tar.gz',
+  keywords = ['Hekr', 'API', 'Wisen', 'Smart Devices', 'IoT'],
   install_requires=[
           'aiohttp',
       ],

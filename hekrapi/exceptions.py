@@ -56,7 +56,7 @@ class CommandNotFoundException(HekrAPIException):
 
 class CommandFailedException(HekrAPIException):
     """Raised when command execution response contains an error"""
-    default_reason = "Could not execute command '{command}' on '{device.device_id}', response: {response}"
+    default_reason = "Could not execute command '{command}' on '{device.device_id}', reason: {reason}, response: {response}"
 
 
 class HeartbeatFailedException(HekrAPIException):

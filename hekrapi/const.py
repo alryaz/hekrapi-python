@@ -13,3 +13,9 @@ FRAME_START_IDENTIFICATION = 0x48
 
 #: Default port to send UDP datagrams to
 DEFAULT_DEVICE_PORT = 10000
+
+#: Default amount of attempts a request should retry doing itself
+DEFAULT_REQUEST_RETRIES = 2
+
+#: Seconds count before attempting to perform next request iteration
+DEFAULT_RETRY_DELAY = 1
