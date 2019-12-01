@@ -1,5 +1,7 @@
+#!/usr/bin/env python3
 from distutils.core import setup
-version = '0.0.4'
+from subprocess import check_output
+version = check_output(['git', 'describe', '--tags']).decode('utf-8').strip()[1:]
 setup(
   name = 'hekrapi',
   packages = ['hekrapi', 'hekrapi.protocols'],

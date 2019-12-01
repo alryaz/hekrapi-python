@@ -19,7 +19,8 @@ class Command:
                  command_id: int,
                  name: str,
                  frame_type: FrameType,
-                 *args: Argument
+                 *args: Argument,
+                 response_command_id:int=None
                  ):
         """Command class constructor
 
@@ -32,6 +33,7 @@ class Command:
         self.name = name
         self.frame_type = frame_type
         self.arguments = list(args)
+        self.response_command_id = response_command_id
 
     def __repr__(self):
         """Friendly command string conversion

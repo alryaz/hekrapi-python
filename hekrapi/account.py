@@ -5,7 +5,7 @@ from typing import Union
 from aiohttp import ClientSession
 
 from .device import Device
-from .const import DEFAULT_APPLICATION_ID
+from .const import DEFAULT_APPLICATION_ID, DEFAULT_WEBSOCKET_HOST
 from .exceptions import AccountUnauthenticatedException, AccountDevicesUpdateFailedException
 
 
@@ -89,26 +89,37 @@ class Account:
                     response_json = await response.json()
 
                     if response.status != 200:
-                        session.close()
-                        raise AccountDevicesUpdateFailedException(self, response)
+                        await session.close()
+                        if response.status == 403:
+                            raise AccountDevicesUpdateFailedException(account=self, response=response, reason='Account credentials incorrect')
+                        else:
+                            raise AccountDevicesUpdateFailedException(account=self, response=response, reason='Unknown HTTP error')
 
                     more_devices = (len(response_json) == request_devices)
 
                     for device_attributes in response_json:
                         device_id = device_attributes['devTid']
+                        connect_host = device_attributes.get('dcInfo', {}).get('connectHost', DEFAULT_WEBSOCKET_HOST)
 
                         if device_id in self.__devices:
-                            self.__devices[device_id].set_control_key(
-                                device_attributes['ctrlKey'])
+                            self.__devices[device_id].set_control_key(device_attributes['ctrlKey'])
+                            self.__devices[device_id].set_cloud_settings(
+                                cloud_token=self.__token,
+                                cloud_domain=connect_host)
                         else:
-                            new_devices[device_id] = Device(
+                            device = Device(
                                 device_id=device_id,
                                 control_key=device_attributes['ctrlKey'],
                                 host=device_attributes['lanIp'],
                                 application_id=self.application_id
                             )
+                            device.set_cloud_settings(
+                                cloud_token=self.__token,
+                                cloud_domain=connect_host
+                            )
+                            new_devices[device_id] = device
 
-            if new_devices:
-                self.__devices.update(new_devices)
+        if new_devices:
+            self.__devices.update(new_devices)
 
         return len(new_devices)
