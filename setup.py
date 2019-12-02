@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 from distutils.core import setup
 from subprocess import check_output
-version = check_output(['git', 'describe', '--tags']).decode('utf-8').strip()[1:]
+version = 'v0.0.7'
 setup(
   name = 'hekrapi',
   packages = ['hekrapi', 'hekrapi.protocols'],
-  version = version,
+  version = version[1:],
   license='MIT',
   description = 'Python Hekr IoT API bindings',
   author = 'Alexander Ryazanov',
   author_email = 'alryaz@xavux.com',
   url = 'https://github.com/alryaz/hekrapi-python',
-  download_url = 'https://github.com/alryaz/hekrapi-python/archive/v' + version + '.tar.gz',
+  download_url = 'https://github.com/alryaz/hekrapi-python/archive/' + version + '.tar.gz',
   keywords = ['Hekr', 'API', 'Wisen', 'Smart Devices', 'IoT'],
   install_requires=[
           'aiohttp',
