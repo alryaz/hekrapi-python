@@ -47,8 +47,6 @@ class Command:
         self.response_command_id = response_command_id
         self.frame_type = frame_type
         self.arguments = arguments
-        if arguments:
-            self.arguments.extend(arguments)
 
     def __repr__(self) -> str:
         """Friendly command string conversion

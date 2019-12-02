@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from distutils.core import setup
 from subprocess import check_output
-version = 'v0.0.7'
+version = 'v0.0.8'
 setup(
   name = 'hekrapi',
   packages = ['hekrapi', 'hekrapi.protocols'],
