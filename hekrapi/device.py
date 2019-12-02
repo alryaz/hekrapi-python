@@ -5,12 +5,13 @@ import logging
 import re
 
 from aiohttp import ClientSession, WSMsgType, client_exceptions
-from typing import Union
+from typing import Tuple, Union, Optional, AnyStr, Any
 from enum import IntEnum, Enum
-from json import (dumps, loads)
+from json import dumps, loads
 from random import getrandbits
 from base64 import b64encode
 
+from .types import CommandSearchIdentifier
 from .aioudp import open_datagram_endpoint, open_remote_endpoint
 from .command import Command
 from .exceptions import (
@@ -53,6 +54,7 @@ def device_id_from_mac_address(mac_address: Union[str, bytearray]) -> str:
     return 'ESP_2M_' + mac_address
 
 class DeviceResponseState(Enum):
+    """Response state of `make_request`"""
     SUCCESS = 0
     FAILURE = 1
     WAIT_NEXT = 2
@@ -71,7 +73,7 @@ class Device:
                  control_key: str,
                  host: Union[str, type(None)]=None,
                  port: int = DEFAULT_DEVICE_PORT,
-                 protocol: Union['Protocol', type(None)]=None,
+                 protocol: Optional['Protocol']=None,
                  application_id: str = DEFAULT_APPLICATION_ID
                  ):
         self.device_id = device_id
@@ -92,7 +94,12 @@ class Device:
         self.__local_endpoint = None
         self.__local_authenticated = False
 
-    def __str__(self):
+    def __str__(self) -> str:
+        """Generates a string representation of the device
+
+        Returns:
+            str -- String representation (human-distinguishable)
+        """
         if self.available_connection_type == DeviceConnectionType.LOCAL:
             return '{}@{}:{}'.format(self.device_id, *self.local_address)
         elif self.available_connection_type == DeviceConnectionType.CLOUD:
@@ -100,7 +107,12 @@ class Device:
         elif self.available_connection_type == DeviceConnectionType.NONE:
             return '{}'.format(self.device_id)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Generates a debug representation of the device
+
+        Returns:
+            str -- Debug representation (python-like)
+        """
         return '<{}({}, {})>'.format(
             self.__class__.__name__,
             self.device_id,
@@ -111,7 +123,12 @@ class Device:
                 else DeviceConnectionType.NONE.name
         )
 
-    def generate_request(self, action:str, params:dict=None, message_id:int=None, connection_type:DeviceConnectionType=None):
+    def generate_request(self,
+                         action:str,
+                         params:dict=None,
+                         message_id:int=None,
+                         connection_type:DeviceConnectionType=None
+                         ) -> bytes:
         """Generate request string (JSON format)
 
         Arguments:
@@ -123,7 +140,6 @@ class Device:
             connection_type {DeviceConnectionType} -- set connection (default: {self.available_connection})
 
         Raises:
-            NotImplementedError: Cloud request generation not yet implemented
             DeviceConnectionMissingException: Device connection missing
 
         Returns:
@@ -159,7 +175,10 @@ class Device:
 
     @property
     def available_connection_type(self) -> DeviceConnectionType:
-        """Retrieve best available connection type for communication
+        """Retrieve best available connection type for communication.
+
+        Best connection type is determined by the availability of the sockets.
+        If none are open, this property will return `DeviceConnectionType.NONE`.
 
         Returns:
             DeviceConnectionType -- Available connection type
@@ -180,25 +199,44 @@ class Device:
         """
         self.__control_key = control_key
 
-    def set_cloud_settings(self, cloud_token: str, cloud_domain: str):
+    def set_cloud_settings(self, cloud_token: str, cloud_domain: str) -> None:
+        """Sets settings for cloud authentication
+
+        Arguments:
+            cloud_token {str} -- Cloud authentication token
+            cloud_domain {str} -- Cloud authentication domain
+        """
         if self.__cloud_domain != cloud_domain or self.__cloud_token != cloud_token:
             self.__cloud_authenticated = False
 
         self.__cloud_token = cloud_token
         self.__cloud_domain = cloud_domain
 
-    async def open_socket_local(self):
-        """Opens local socket to device"""
+    async def open_socket_local(self) -> bool:
+        """Opens local socket to device
+
+        Returns:
+            bool -- State of socket opening
+        """
         _LOGGER.debug('Opening local endpoint on device %s', self)
         self.__local_endpoint = await open_remote_endpoint(*self.local_address)
         return True
 
-    def _generate_websocket_key(self):
+    def _generate_websocket_key(self) -> str:
+        """Generates WebSocket secret key to send as a header with initial request.
+
+        Returns:
+            str -- WebSocket secret key
+        """
         raw_key = bytes(getrandbits(8) for _ in range(16))
         return b64encode(raw_key).decode()
 
-    async def open_socket_cloud(self):
-        """Opens cloud socket to device"""
+    async def open_socket_cloud(self) -> bool:
+        """Opens cloud socket to device
+
+        Returns:
+            bool -- State of socket opening
+        """
         _LOGGER.debug('Opening cloud endpoint on device %s', self)
         try:
             session = ClientSession()
@@ -217,7 +255,19 @@ class Device:
             await session.close()
             return False
 
-    def _handle_incoming_response(self, response:dict, message_id:int):
+    def _handle_incoming_response(self,
+                                  response:AnyStr,
+                                  message_id:int
+                                  ) -> Tuple[DeviceResponseState, Any]:
+        """Handle incoming response packet (decode from existing string)
+
+        Arguments:
+            response {AnyStr} -- Response string
+            message_id {int} -- Message ID (used for compliance verification)
+
+        Returns:
+            Tuple[DeviceResponseState, Any] -- Tuple of (state, data)
+        """
         if isinstance(response, bytes):
             data = response.decode('utf-8')
         else:
@@ -404,7 +454,7 @@ class Device:
                     params=params)
 
     async def command(self,
-                command: Union[int, str, Command],
+                command: Union[CommandSearchIdentifier, Command],
                 data: dict = None,
                 frame_number:int=None,
                 return_decoded:bool=True,

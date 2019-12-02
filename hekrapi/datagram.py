@@ -3,6 +3,7 @@
 
 from typing import Union, Tuple
 
+from .types import DatagramType
 from .exceptions import (
     InvalidMessagePrefixException,
     InvalidMessageLengthException,
@@ -14,15 +15,15 @@ from .exceptions import (
 )
 from .const import FRAME_START_IDENTIFICATION
 
-def decode(protocol: 'Protocol', raw: Union[bytearray, str],
+def decode(protocol: 'Protocol', raw: DatagramType,
            use_variable_names=False,
            filter_values=True
-           ) -> Tuple['Command', dict, int]:
+           ) -> Tuple['Command', DatagramType, int]:
     """Decode raw Hekr datagram
 
     Arguments:
-        protocol {[type]} -- [description]
-        raw {Union[bytearray, str]} -- [description]
+        protocol {Protocol} -- Protocol definition
+        raw {DatagramType} -- Raw datagram
 
     Keyword Arguments:
         use_variable_names {bool} -- Use variable names when decoding (default: {False})

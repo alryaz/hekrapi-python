@@ -4,11 +4,12 @@
 from yaml import dump as yaml_dump, load as yaml_load, SafeLoader, SafeDumper
 from json import dumps as json_dumps
 
-from typing import Union
+from typing import Union, List, Dict
 from collections import OrderedDict
 
+from .types import (DecodedDataType, DatagramType, CommandSearchIdentifier)
 from .command import Command, FrameType
-from .exceptions import CommandNotFoundException
+from .exceptions import CommandNotFoundException, HekrTypeError, HekrValueError
 from .datagram import encode, decode
 
 def remove_none(obj):
@@ -32,37 +33,66 @@ class Protocol:
         self.commands = list(args)
 
     @property
-    def commands(self):
+    def commands(self) -> List[Command]:
+        """Commands list setter
+
+        Returns:
+            List[Command] -- List of commands associated with the protocol
+        """
         return self.__commands
 
     @commands.setter
-    def commands(self, commands):
-        if not isinstance(commands, list):
-            raise TypeError('Commands list should be of `list` type')
+    def commands(self, value:List[Command]) -> None:
+        """Commands list setter
 
-        invalid_types = [str(type(x)) for x in commands
+        Checks whether the value passed is of `list` type and that all elements of the list
+        are of `Command` type.
+
+        Arguments:
+            value {[type]} -- [description]
+
+        Raises:
+            HekrTypeError: Raised when passed value is of a different type than `list`
+            HekrTypeError: Raised when passed list contains elements of different type(s) than `list`
+        """
+        if not isinstance(value, list):
+            raise HekrTypeError(variable='commands', expected=list, got=type(value))
+
+        invalid_types = [type(x) for x in value
             if not isinstance(x, Command)]
         if invalid_types:
-            raise ValueError(
-                'Commands list contains values that are not of `%s` type: %s'
-                % (Command.__name__, ', '.join(invalid_types)))
+            raise HekrTypeError(variable='commands', expected=Command, got=invalid_types)
 
-        self.__commands = commands
+        self.__commands = value
 
-    def __getitem__(self, key: Union[int, str]):
+    def __getitem__(self, key: CommandSearchIdentifier) -> Command:
         """Retrieves command with a square bracket accessor
 
         Arguments:
-            key {Union[int, str]} -- Command ID/name
+            key {CommandSearchIdentifier} -- Command ID/name
 
         Returns:
             Command -- Found command object
         """
         return self.get_command(key)
 
-    def decode(self, raw: Union[bytearray, str],
-               use_variable_names=False, filter_values=True) -> dict:
-        """Protocol-oriented datagram decoding"""
+    def decode(self, raw: DatagramType,
+               use_variable_names=False, filter_values=True) -> DecodedDataType:
+        """Protocol-oriented datagram decoding
+
+        Provides a wrapper for an out-of-class decoding function from `datagram` submodule.
+        The wrapper passes all existing parameters alongside `self` as `protocol` argument.
+
+        Arguments:
+            raw {Union[bytearray, str]} -- Raw datagram string
+
+        Keyword Arguments:
+            use_variable_names {bool} -- Use variable names as keys with data (default: {False})
+            filter_values {bool} -- Filter values (multiply/round) (default: {True})
+
+        Returns:
+            DecodedDataType -- Dictionary of result values
+        """
         return decode(
             raw=raw,
             protocol=self,
@@ -74,11 +104,28 @@ class Protocol:
                command: Union[int,
                               str,
                               Command],
-               data: dict,
+               data: DecodedDataType,
                frame_number: int,
                use_variable_names=False,
-               filter_values=True) -> str:
-        """Protocol-oriented datagram encoding"""
+               filter_values=True) -> DatagramType:
+        """Protocol-oriented datagram encoding
+
+        Provides a wrapper for an out-of-class encoding function from `datagram` submodule.
+        The wrapper searches for a command within the protocol and passes all existing parameters
+        alongside the result as `command` argument.
+
+        Arguments:
+            command {Union[int,str,Command]} -- Command identifier or object
+            data {dict} -- Data dictionary
+            frame_number {int} -- Frame number
+
+        Keyword Arguments:
+            use_variable_names {bool} -- Use variable names as keys with data (default: {False})
+            filter_values {bool} -- Filter values (multiply/round) (default: {True})
+
+        Returns:
+            str -- Raw datagram string
+        """
         return encode(
             command=self.get_command(command),
             data=data,

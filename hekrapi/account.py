@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Account class module for HekrAPI"""
 
-from typing import Union
+from typing import Union, Dict, List
 from aiohttp import ClientSession
 
 from .device import Device
@@ -43,11 +43,11 @@ class Account:
         self.__devices = {}
 
     @property
-    def devices(self):
+    def devices(self) -> Dict[str, Device]:
         """Device dictionary accessor
 
         Returns:
-            dict -- dictionary of devices (device_id => Device object)
+            Dict[str, Device] -- dictionary of devices (device_id => Device object)
         """
         return self.__devices
 
@@ -58,14 +58,16 @@ class Account:
         """Update devices for account
 
         Raises:
-            AccountUnauthenticatedException: [description]
+            AccountUnauthenticatedException: Raised when attempting cloud data update
+                without performing primary authentication (or explicitly setting
+                authentication token at `__init__` stage)
 
         Returns:
             int -- New devices found (that do not exist within the __devices attribute)
         """
 
         if not self.__token:
-            raise AccountUnauthenticatedException()
+            raise AccountUnauthenticatedException(account=self)
 
         base_url_devices = self.BASE_URL + '/devices?size={}&page={}'
 
@@ -110,7 +112,7 @@ class Account:
                             device = Device(
                                 device_id=device_id,
                                 control_key=device_attributes['ctrlKey'],
-                                #host=device_attributes['lanIp'],
+                                host=device_attributes['lanIp'],
                                 application_id=self.application_id
                             )
                             device.set_cloud_settings(
