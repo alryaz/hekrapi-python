@@ -8,7 +8,9 @@ from .exceptions import (
     InvalidMessageLengthException,
     InvalidMessageChecksumException,
     InvalidMessageFrameTypeException,
-    InvalidDataMissingKeyException
+    InvalidDataMissingKeyException,
+    InvalidDataLessThanException,
+    InvalidDataGreaterThanException
 )
 from .const import FRAME_START_IDENTIFICATION
 
@@ -117,6 +119,18 @@ def encode(command: 'Command', data: dict = None, frame_number: int = 1,
 
         if value_input is None:
             raise InvalidDataMissingKeyException(data_key=key)
+
+        if argument.value_min is not None and argument.value_min > value_input:
+            raise InvalidDataLessThanException(
+                data_key=key,
+                value=value_input,
+                value_min=argument.value_min)
+
+        if argument.value_max is not None and argument.value_max < value_input:
+            raise InvalidDataGreaterThanException(
+                data_key=key,
+                value=value_input,
+                value_max=argument.value_max)
 
         if filter_values:
             if argument.multiplier:

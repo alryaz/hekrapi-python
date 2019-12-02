@@ -110,7 +110,7 @@ class Account:
                             device = Device(
                                 device_id=device_id,
                                 control_key=device_attributes['ctrlKey'],
-                                host=device_attributes['lanIp'],
+                                #host=device_attributes['lanIp'],
                                 application_id=self.application_id
                             )
                             device.set_cloud_settings(

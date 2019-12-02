@@ -2,11 +2,14 @@
 """Device class module for Hekr API"""
 import asyncio
 import logging
+import re
 
-from aiohttp import ClientSession, WSMsgType
+from aiohttp import ClientSession, WSMsgType, client_exceptions
 from typing import Union
 from enum import IntEnum, Enum
 from json import (dumps, loads)
+from random import getrandbits
+from base64 import b64encode
 
 from .aioudp import open_datagram_endpoint, open_remote_endpoint
 from .command import Command
@@ -27,6 +30,9 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+SENSITIVE_INFO_REGEX = re.compile(r'("(ctrlKey|token)"\s*:\s*")[^"]+(")')
+SENSITIVE_INFO_FILTER = lambda content: SENSITIVE_INFO_REGEX.sub(r'\1<redacted>\3', content)
 
 def device_id_from_mac_address(mac_address: Union[str, bytearray]) -> str:
     """Convert mac address to device ID
@@ -123,8 +129,7 @@ class Device:
         Returns:
             bytes -- Bytes-encoded JSON request
         """
-        if connection_type is None:
-            connection_type = self.available_connection_type
+        connection_type = connection_type or self.available_connection_type
 
         if message_id is None:
             self.__last_message_id += 1
@@ -160,9 +165,9 @@ class Device:
             DeviceConnectionType -- Available connection type
         """
         # @TODO: check for more stuff to determine connection type
-        if self.local_address is not None and self.__control_key is not None:
+        if self.__local_endpoint is not None:
             return DeviceConnectionType.LOCAL
-        if self.__cloud_token is not None and self.__cloud_domain is not None:
+        if self.__cloud_endpoint is not None:
             return DeviceConnectionType.CLOUD
 
         return DeviceConnectionType.NONE
@@ -186,16 +191,41 @@ class Device:
         """Opens local socket to device"""
         _LOGGER.debug('Opening local endpoint on device %s', self)
         self.__local_endpoint = await open_remote_endpoint(*self.local_address)
+        return True
+
+    def _generate_websocket_key(self):
+        raw_key = bytes(getrandbits(8) for _ in range(16))
+        return b64encode(raw_key).decode()
 
     async def open_socket_cloud(self):
         """Opens cloud socket to device"""
         _LOGGER.debug('Opening cloud endpoint on device %s', self)
-        session = ClientSession()
-        self.__cloud_endpoint = await session.ws_connect('https://{}/'.format(self.__cloud_domain))
+        try:
+            session = ClientSession()
+            self.__cloud_endpoint = await session.ws_connect(
+                'https://{}:186/'.format(self.__cloud_domain),
+                headers={
+                    'Sec-WebSocket-Key': self._generate_websocket_key,
+                    'Sec-WebSocket-Version': '13',
+                    'Connection': 'upgrade',
+                    'Upgrade': 'websocket'
+                })
+            _LOGGER.debug('Cloud endpoint opened on device %s', self)
+            return True
+        except client_exceptions.ClientConnectionError:
+            _LOGGER.exception('Client connection could not be established')
+            await session.close()
+            return False
 
     def _handle_incoming_response(self, response:dict, message_id:int):
-        _LOGGER.debug('Received response for device %s: %s', self, response)
-        data = response.decode('utf-8')
+        if isinstance(response, bytes):
+            data = response.decode('utf-8')
+        else:
+            data = response
+        data = data.strip()
+
+        _LOGGER.debug('Received response for device %s: %s', self, SENSITIVE_INFO_FILTER(data))
+
         response_dict = loads(data)
 
         # @TODO: compare message ids to verify correct request sequence
@@ -210,6 +240,16 @@ class Device:
             else:
                 _LOGGER.error('Authentication failed on device %s', self)
                 self.__local_authenticated = False
+                state = DeviceResponseState.FAILURE
+
+        elif response_dict.get('action') == 'appLoginResp':
+            if response_dict.get('code') == 200:
+                _LOGGER.debug('Authentication executed succesfully on device %s', self)
+                self.__cloud_authenticated = True
+                state = DeviceResponseState.SUCCESS
+            else:
+                _LOGGER.error('Authentication failed on device %s', self)
+                self.__cloud_authenticated = False
                 state = DeviceResponseState.FAILURE
 
         elif response_dict.get('action') == 'heartbeatResp':
@@ -282,7 +322,10 @@ class Device:
             connection_type=connection_type
         )
 
-        _LOGGER.debug('Composed request for device %s, content: %s', self, request)
+        # @TODO: maybe move encoding to `generate_request`?
+        request_str = request.decode('utf-8')
+
+        _LOGGER.debug('Composed request for device %s, content: %s', self, SENSITIVE_INFO_FILTER(request_str))
 
         if connection_type == DeviceConnectionType.LOCAL:
             if not self.__local_endpoint:
@@ -291,7 +334,7 @@ class Device:
         elif connection_type == DeviceConnectionType.CLOUD:
             if not self.__cloud_endpoint:
                 await self.open_socket_cloud()
-            self.__cloud_endpoint.send_str(request)
+            await self.__cloud_endpoint.send_str(request_str)
 
         retries = 0
         while retries < DEFAULT_REQUEST_RETRIES:
@@ -299,9 +342,10 @@ class Device:
                 data = await self.__local_endpoint.receive()
             elif connection_type == DeviceConnectionType.CLOUD:
                 message = await self.__cloud_endpoint.receive()
-                if message.tp == WSMsgType.TEXT:
+
+                if message.type == WSMsgType.TEXT:
                     data = message.data
-                elif message.tp == WSMsgType.BINARY:
+                elif message.type == WSMsgType.BINARY:
                     data = message.data.decode('utf-8')
                 else:
                     return (DeviceResponseState.FAILURE, data)
@@ -394,8 +438,7 @@ class Device:
             self.__last_frame_number += 1
             frame_number = self.__last_frame_number
 
-        if connection_type is None:
-            connection_type = self.available_connection_type
+        connection_type = connection_type or self.available_connection_type
 
         raw = self.protocol.encode(
             data=data,
@@ -405,13 +448,8 @@ class Device:
 
         request_dict = {"appTid": self.application_id, "data": {"raw": raw}}
 
-        state, response = await self.make_request(
+        return await self.make_request(
             action='appSend',
             params=request_dict,
             connection_type=connection_type
         )
-
-        if state == DeviceResponseState.SUCCESS:
-            return response
-
-        raise CommandFailedException(device=self, command=command, response=response)

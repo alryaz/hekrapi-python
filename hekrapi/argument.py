@@ -2,47 +2,41 @@
 # pylint: disable=too-many-instance-attributes,too-many-arguments
 """Argument class module for HekrAPI"""
 
-from typing import Callable, Any, Union, Tuple
+from typing import Callable, Any, Union, Tuple, Optional
 from enum import IntEnum
 
 ArgumentType = Callable[[Any], Any]
 class Argument:
-    """Argument class for HekrAPI
-
-    Returns:
-        Argument -- Argument definition
-    """
+    """Argument class for HekrAPI"""
 
     def __init__(self, name: str,
-                 value_type: Union[Tuple[ArgumentType, ArgumentType], ArgumentType],
-                 byte_length: int,
-                 variable: Union[str, type(None)]=None,
-                 multiplier: Union[int, float, type(None)]=None,
-                 decimals: Union[int, type(None)]=None,
-                 value_min: Union[int, float, type(None)]=None,
-                 value_max: Union[int, float, type(None)]=None,
+                 value_type: Union[Tuple[ArgumentType, ArgumentType], ArgumentType]=int,
+                 byte_length: int=1,
+                 variable: Optional[str]=None,
+                 multiplier: Optional[Union[int, float]]=None,
+                 decimals: Optional[int]=None,
+                 value_min: Optional[Union[int, float]]=None,
+                 value_max: Optional[Union[int, float]]=None,
                  ):
-        """Argument constructor
+        """Argument class constructor
 
         Arguments:
             name {str} -- Argument name
-            value_type {Union[Tuple[ArgumentType, ArgumentType], ArgumentType]} -- Value type
-            byte_length {int} -- Length of input value in bytes
 
         Keyword Arguments:
-            variable {Union[str, type} -- Variable name
-                                          (in absence, name argument is used)
-                                          (default: {None})
-            multiplier {Union[int, float, type} -- What to multiply input/divide output values by
-                                                   (default: {None})
-            decimals {Union[int, type} -- Decimals to round input value to
-                                          (in absence, extracted from multiply argument)
-                                          (default: {None})
-            value_min {Union[int, float, type} -- [description] (default: {None})
-            value_max {Union[int, float, type} -- [description] (default: {None})
+            value_type {Union[Tuple[ArgumentType, ArgumentType], ArgumentType]} --
+                Input and output type (may be different if defined as tuple) (default: {int})
+            byte_length {int} -- Length of input value in bytes (default: {1})
+            variable {Optional[str]} -- Variable name (default: argument's name)
+            multiplier {Optional[Union[int, float]]} -- What to multiply input/divide output values by
+                (default: {None})
+            decimals {Optional[int]} -- Decimals to round input value to (in absence
+                of explicit setting, extracted from `multiply` attribute) (default: {None})
+            value_min {Optional[Union[int, float]]} -- Minimum value during encoding (default: {None})
+            value_max {Optional[Union[int, float]]} -- Maximum value during encoding (default: {None})
         """
         self.name = name
-        self.variable = variable or name
+        self.variable = variable
         self.byte_length = byte_length
 
         if isinstance(value_type, IntEnum):
@@ -57,15 +51,10 @@ class Argument:
             self.type_input = value_type
             self.type_output = value_type
 
-        self.min = value_min
-        self.max = value_max
+        self.value_min = value_min
+        self.value_max = value_max
+        self.decimals = decimals
         self.multiplier = multiplier
-
-        # @TODO: check if numeric
-        if multiplier is not None and decimals is None:
-            self.decimals = str(self.multiplier)[::-1].find('.')
-        else:
-            self.decimals = decimals
 
     def __repr__(self):
         """Overloaded argument definiton
@@ -75,21 +64,42 @@ class Argument:
         """
         return '<{}({})>'.format(self.__class__.__name__, self.name)
 
-    def print_definition(self, prefix=''):
-        """Print argument definition in YAML format
+    @property
+    def decimals(self) -> int:
+        """Getter for decimals count to round result to
 
-        Keyword Arguments:
-            prefix {str} -- What to prefix every line with (default: {''})
+        Extracts decimal point from multiplier unless a specific value is set
+        via getter method.
+
+        Returns:
+            int -- Floating point digits
         """
-        print(prefix + self.name + ':')
-        new_prefix = prefix + '  '
+        if self.__decimals is None:
+            decimals = str(self.multiplier)[::-1].find('.')
+            return 0 if decimals < 0 else decimals
 
-        for attr in ['variable', 'type_input', 'type_output',
-                     'multiplier', 'decimals', 'min', 'max']:
-            argument_attribute_value = self.__getattribute__(attr)
+        return self.__decimals
 
-            if argument_attribute_value is not None:
-                if isinstance(argument_attribute_value, type):
-                    argument_attribute_value = argument_attribute_value.__name__
+    @decimals.setter
+    def decimals(self, value):
+        """Getter for decimals count to round result to"""
+        self.__decimals = value
 
-                print(new_prefix + '{}: {}'.format(attr, argument_attribute_value))
+    @property
+    def variable(self) -> str:
+        """Getter for variable name
+
+        Variable name is used in several encoding/decoding scenarios.
+        It defaults to `name` attribute if not set explicitly.
+
+        Returns:
+            str -- Variable name
+        """
+        if self.__variable is None:
+            return self.name
+        return self.__variable
+
+    @variable.setter
+    def variable(self, value):
+        """Setter for variable name"""
+        self.__variable = value
