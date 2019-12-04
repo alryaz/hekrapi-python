@@ -1,6 +1,30 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=too-many-locals
-"""Global constants for HekrAPI module"""
+"""Global constants and enums for HekrAPI module"""
+
+from enum import Enum
+
+
+class FrameType(Enum):
+    """Datagram frame types (per Hekr documentation)"""
+    RECEIVE = 0x01
+    SEND = 0x02
+    DEVICE = 0xFE
+    ERROR = 0xFF
+
+
+#: Device response states
+class DeviceResponseState(Enum):
+    """Response state of `make_request`"""
+    SUCCESS = 0
+    FAILURE = 1
+    WAIT_NEXT = 2
+
+
+class DeviceConnectionType(Enum):
+    LOCAL = 1
+    CLOUD = 2
+
 
 #: Default application ID used within requests via cloud and local transports
 DEFAULT_APPLICATION_ID = 'hekr_python_connector'

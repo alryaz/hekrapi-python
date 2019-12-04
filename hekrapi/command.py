@@ -1,41 +1,36 @@
 # -*- coding: utf-8 -*-
 """Command class module for HekrAPI"""
 
-from enum import IntEnum, Enum
-from typing import Union
+from typing import List
 
 from .argument import Argument
 from .exceptions import HekrTypeError, HekrValueError
+from .const import FrameType
 
-class FrameType(IntEnum):
-    """Datagram frame types (per Hekr documentation)"""
-    RECEIVE = 0x01
-    SEND = 0x02
-    DEVICE = 0xFE
-    ERROR = 0xFF
 
 class Command:
     """Command class for HekrAPI"""
 
     def __init__(self,
                  command_id: int,
-                 frame_type: FrameType=FrameType.SEND,
-                 name: str=None,
-                 arguments:list=None,
-                 response_command_id:int=None):
-        """Command class constructor
-
-        Arguments:
-            command_id {int} -- Command identifier for datagrams
-            name {str} -- Command name for calls
-            frame_type {FrameType} -- Command frame type (per Hekr docs)
+                 frame_type: FrameType = FrameType.SEND,
+                 name: str = None,
+                 arguments: list = None,
+                 response_command_id: int = None):
         """
+        Command class constructor.
 
-        if isinstance(frame_type, str):
-            try:
-                frame_type = FrameType[frame_type.upper()]
-            except KeyError:
-                raise ValueError('`frame_type` must be one of the following values (case-insensitive) when passed as string: %s (got %s)' % (', '.join(['`'+value.name.lower()+'`' for value in FrameType]), '`'+frame_type+'`'))
+        :param command_id: Command identifier for datagrams.
+        :param frame_type: Frame type for command.
+        :param name: Command name (rarely used externally).
+        :param arguments: List of arguments bound to command.
+        :param response_command_id: Command ID to wait for response from.
+        :type command_id: int
+        :type frame_type: FrameType
+        :type name: str
+        :type arguments: list
+        :type response_command_id: int
+        """
 
         # circular checking prevents following private attributes
         # from being created automatically
@@ -49,75 +44,86 @@ class Command:
         self.arguments = arguments
 
     def __repr__(self) -> str:
-        """Friendly command string conversion
-
-        Returns:
-            str -- Friendly debug representation
         """
-        return '<{}("{}", {}, {})>'.format(
+        Get pythonic command object representation.
+
+        :return: Command representation (Python-like)
+        :rtype: str
+        """
+        return '<{}({}, {}, {})>'.format(
             self.__class__.__name__,
-            self.name,
+            '"' + self.name + '"' if self.name is not None else None,
             self.command_id,
             self.frame_type.name
         )
 
     def __str__(self) -> str:
-        """Return name of the command
+        """
+        Command name alternative getter.
 
-        Returns:
-            str -- Command name
+        :return: Command name
+        :rtype: str
         """
         return self.name
 
     def __int__(self) -> int:
-        """Return command identifier
+        """
+        Command ID alternative getter.
 
-        Returns:
-            int -- Command identifier
+        :return:
         """
         return self.command_id
 
     @property
     def command_id(self) -> int:
-        """Getter for numeric command identifier"""
+        """
+        Command ID getter.
+
+        :return: Command ID.
+        :rtype: int
+        """
         return self.__command_id
 
     @command_id.setter
-    def command_id(self, value:int):
-        """Setter for numeric command identifier
+    def command_id(self, value: int) -> None:
+        """
+        Command ID setter.
 
-        Checks whether `command_id` being set to a correct integer value
-        between 0 and 255 (a boundary imposed by datagram protocol)
-
-        Arguments:
-            value {int} -- Numeric command identifier for given command
-
-        Raises:
+        :param value: Command ID.
+        :raises:
             HekrTypeError: Raised when the value fed is not an integer.
             HekrValueError: Raised when a value is out of bounds of bytes constraint.
         """
         if not isinstance(value, int):
-            raise HekrTypeError(variable='command_id', expected=int, got=type(value))
+            raise HekrTypeError(variable='command_id',
+                                expected=int,
+                                got=type(value))
         elif 255 < value < 0:
-            raise HekrValueError(variable='command_id', expected='integer from 0 to 255', got=value)
+            raise HekrValueError(variable='command_id',
+                                 expected='integer from 0 to 255',
+                                 got=value)
         self.__command_id = value
 
     @property
     def frame_type(self) -> FrameType:
-        """Getter for `frame_type` attribute"""
+        """
+        Getter for `frame_type` attribute.
+
+        :return: Frame type for command.
+        :rtype: FrameType
+        """
         return self.__frame_type
 
     @frame_type.setter
-    def frame_type(self, value:FrameType):
-        """Setter for `frame_type` attribute
+    def frame_type(self, value: FrameType) -> None:
+        """
+        Setter for `frame_type` attribute.
 
         Coerces any incoming value on invocation to `FrameType` class instances.
         Throws exceptions when incorrect data is being fed.
 
-        Arguments:
-            value {Any} -- Value (coercible to `FrameType`)
-
-        Raises:
+        :param value: Frame type for command.
+        :raises:
             HekrTypeError: Raised when the value is not coercible to a `FrameType` instance
             HekrValueError: Raised when the value is not `FrameType.SEND` when `response_command_id` attribute is set.
         """
@@ -129,43 +135,81 @@ class Command:
             else:
                 new_frame_type = FrameType(value)
         except KeyError:
-            raise HekrValueError(variable='frame_type', expected=', '.join(map(lambda x: "'"+x.name.lower()+"'", FrameType))+" (case-insensitive)", got="'"+value+"'")
+            raise HekrValueError(variable='frame_type',
+                                 expected=', '.join(map(lambda x: "'"+x.name.lower()+"'", FrameType)) +
+                                          " (case-insensitive)",
+                                 got=value)
         except ValueError:
-            raise HekrTypeError(variable='frame_type', expected='coercible to `%s`' % FrameType.__name__, got=type(value))
+            raise HekrTypeError(variable='frame_type',
+                                expected='coercible to `%s`' % FrameType.__name__,
+                                got=type(value))
 
         if new_frame_type != FrameType.SEND and self.response_command_id is not None:
-            raise HekrValueError(variable='frame_type', expected='`%s` due to `response_command_id` being set' % FrameType.SEND, got=new_frame_type)
+            raise HekrValueError(variable='frame_type',
+                                 expected='`%s` due to `response_command_id` being set' % FrameType.SEND,
+                                 got=new_frame_type)
 
         self.__frame_type = new_frame_type
 
     @property
-    def arguments(self) -> list:
+    def arguments(self) -> List[Argument]:
+        """
+        Arguments list getter.
+        :return: List of arguments.
+        :rtype: list[Argument]
+        """
         return self.__arguments
 
     @arguments.setter
-    def arguments(self, value):
+    def arguments(self, value: List[Argument]) -> None:
+        """
+        Arguments list setter.
+
+        Throws exceptions when incorrect data is being fed.
+
+        :param value: List of arguments for command.
+        :raises:
+            HekrTypeError: Raised when one or more values is not of `Argument` type.
+            HekrTypeError: Raised when arguments list is fed something other than lists.
+        """
         if isinstance(value, list):
             invalid_types = [type(x) for x in value
                 if not isinstance(x, Argument)]
 
             if invalid_types:
-                raise HekrTypeError(variable='arguments list', expected=Argument, got=invalid_types)
+                raise HekrTypeError(variable='arguments list',
+                                    expected=Argument,
+                                    got=invalid_types)
         elif value is not None:
-            raise HekrTypeError(variable='arguments list', expected=[list, type(None)], got=type(value))
+            raise HekrTypeError(variable='arguments list',
+                                expected=[list, type(None)],
+                                got=type(value))
 
         self.__arguments = value or []
 
     @property
-    def response_command_id(self):
+    def response_command_id(self) -> int:
+        """
+        Response command ID getter.
+
+        :return: int
+        """
         return self.__response_command_id
 
     @response_command_id.setter
     def response_command_id(self, value):
         if value is not None:
             if self.frame_type is not None and self.frame_type != FrameType.SEND:
-                raise HekrValueError(variable='response_command_id', expected='`None` due to `frame_type` not being set to `FrameType.SEND` (current value `%s`)' % self.frame_type, got=value)
+                raise HekrValueError(variable='response_command_id',
+                                     expected='`None` due to `frame_type` not being set to `FrameType.SEND` '
+                                              '(current value `%s`)' % self.frame_type,
+                                     got=value)
             elif not isinstance(value, int):
-                raise HekrTypeError(variable='response_command_id', expected=int, got=type(value))
+                raise HekrTypeError(variable='response_command_id',
+                                    expected=int,
+                                    got=type(value))
             elif value < 0:
-                raise HekrValueError(variable='response_command_id', expected='>= 0', got=value)
+                raise HekrValueError(variable='response_command_id',
+                                     expected='>= 0',
+                                     got=value)
         self.__response_command_id = value

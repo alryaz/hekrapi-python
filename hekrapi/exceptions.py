@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """Exception classes for Hekr API"""
 
+
 class HekrAPIException(Exception):
     pass
+
 
 class HekrAPIFormattedException(HekrAPIException):
     """Base exception class for all HekrAPI exceptions"""
@@ -20,7 +22,7 @@ class HekrAPIFormattedException(HekrAPIException):
 
 class InvalidMessageException(HekrAPIFormattedException):
     """Base exception class for other message-related exceptions"""
-    default_message = 'Invalid Hekr message prvided'
+    default_message = 'Invalid Hekr message provided'
 
 
 class InvalidMessagePrefixException(InvalidMessageException):
@@ -52,11 +54,14 @@ class InvalidDataMissingKeyException(InvalidDataException):
     """Raised when a specific data key is missing from the provided data dictionary"""
     default_message = "Key `{data_key}` not found in provided data dictionary"
 
+
 class InvalidDataLessThanException(InvalidDataException):
     default_message = "Key `{data_key}` contains value '{value}' that is less than minimum '{value_min}'"
 
+
 class InvalidDataGreaterThanException(InvalidDataException):
     default_message = "Key `{data_key}` contains value '{value}' that is greater than maximum '{value_max}'"
+
 
 class CommandNotFoundException(HekrAPIFormattedException):
     """Raised when a command was not found by value"""
@@ -65,7 +70,7 @@ class CommandNotFoundException(HekrAPIFormattedException):
 
 class CommandFailedException(HekrAPIFormattedException):
     """Raised when command execution response contains an error"""
-    default_message = "Could not execute command '{command}' on '{device.device_id}', reason: {reason}, response: {response}"
+    default_message = "Could not execute command '{command}' on '{device.device_id}', reason: {reason}"
 
 
 class HeartbeatFailedException(HekrAPIFormattedException):
@@ -102,13 +107,16 @@ class DeviceConnectionMissingException(HekrAPIFormattedException):
     """Raised when device call cannot be made due to missing connection parameters"""
     default_message = 'Cannot make requests to device until connection parameters are provided'
 
+
 class AccountDevicesUpdateFailedException(HekrAPIFormattedException):
     """Raised when devices update function encounters a status code other than OK"""
     default_message = 'Devices update on account failed, reason: {reason}'
 
+
 class HekrAPIExpectedGotException(HekrAPIException):
     """Base exception for variable-expected-got exceptions"""
     default_message = "For variable {variable} expected {expected}, got {got}"
+
     def __init__(self, variable, got, expected):
         if not isinstance(expected, list):
             expected = [expected]
@@ -122,19 +130,17 @@ class HekrAPIExpectedGotException(HekrAPIException):
         if not isinstance(got, list):
             got = [got]
 
-        got = ', '.join([
-            ('`' + v.__name__ + '`' if isinstance(v, type)
-            else str(v))
-            for v in got
-        ])
+        got = ', '.join([('`' + v.__name__ + '`' if isinstance(v, type) else str(v)) for v in got])
 
         variable = str(variable)
         variable = variable if ' ' in variable else '`' + variable + '`'
 
         super().__init__(self.default_message.format(variable=variable, got=got, expected=expected))
 
+
 class HekrTypeError(HekrAPIExpectedGotException):
     default_message = 'Type for {variable} is invalid (expected {expected}; got {got})'
+
 
 class HekrValueError(HekrAPIExpectedGotException):
     default_message = 'Value(s) for {variable} is invalid (expected {expected}; got {got})'

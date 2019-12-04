@@ -4,54 +4,61 @@
 from yaml import dump as yaml_dump, load as yaml_load, SafeLoader, SafeDumper
 from json import dumps as json_dumps
 
-from typing import Union, List, Dict
-from collections import OrderedDict
+from typing import Union, List, Tuple, Dict, Any
 
-from .types import (DecodedDataType, DatagramType, CommandSearchIdentifier)
-from .command import Command, FrameType
+from .command import Command
 from .exceptions import CommandNotFoundException, HekrTypeError, HekrValueError
-from .datagram import encode, decode
+from .helpers import datagram_encode, datagram_decode
+
 
 def remove_none(obj):
+    """
+    Remove empty values recursively from an iterable dictionary.
+
+    :param obj:
+    :return:
+    """
     if isinstance(obj, (list, tuple, set)):
         return type(obj)(remove_none(x) for x in obj if x is not None)
     elif isinstance(obj, dict):
-        return type(obj)((remove_none(k), remove_none(v))
-        for k, v in obj.items() if k is not None and v is not None)
+        return type(obj)(
+            (remove_none(k), remove_none(v))
+            for k, v in obj.items() if k is not None and v is not None
+        )
     else:
         return obj
 
+
 class Protocol:
-    """Protocol class definition for Hekr API"""
+    """ Protocol definition class """
 
     def __init__(self, *args):
-        """Protocol class constructor
+        """
+        Protocol definition constructor.
 
-        Arguments:
-            *args {Command} -- Commands included in the protocol
+        :param args: Variable-length of arguments, `Command` objects.
         """
         self.commands = list(args)
 
     @property
     def commands(self) -> List[Command]:
-        """Commands list setter
+        """
+        Commands list getter.
 
-        Returns:
-            List[Command] -- List of commands associated with the protocol
+        :return: List of commands.
+        :rtype: list[Command]
         """
         return self.__commands
 
     @commands.setter
-    def commands(self, value:List[Command]) -> None:
-        """Commands list setter
+    def commands(self, value: List[Command]) -> None:
+        """
+        Commands list setter.
 
         Checks whether the value passed is of `list` type and that all elements of the list
         are of `Command` type.
-
-        Arguments:
-            value {[type]} -- [description]
-
-        Raises:
+        :param value: List of commands
+        :raises:
             HekrTypeError: Raised when passed value is of a different type than `list`
             HekrTypeError: Raised when passed list contains elements of different type(s) than `list`
         """
@@ -65,35 +72,32 @@ class Protocol:
 
         self.__commands = value
 
-    def __getitem__(self, key: CommandSearchIdentifier) -> Command:
-        """Retrieves command with a square bracket accessor
+    def __getitem__(self, key: Union[int, str]) -> Command:
+        """
+        Retrieves command definition by name or identifier via square-bracket accessor.
 
-        Arguments:
-            key {CommandSearchIdentifier} -- Command ID/name
-
-        Returns:
-            Command -- Found command object
+        :param key: Command identifier (name or ID)
+        :type key: int, str
+        :return: Command object
+        :raises:
+            CommandNotFoundException: if command is not found.
         """
         return self.get_command(key)
 
-    def decode(self, raw: DatagramType,
-               use_variable_names=False, filter_values=True) -> DecodedDataType:
-        """Protocol-oriented datagram decoding
-
-        Provides a wrapper for an out-of-class decoding function from `datagram` submodule.
-        The wrapper passes all existing parameters alongside `self` as `protocol` argument.
-
-        Arguments:
-            raw {Union[bytearray, str]} -- Raw datagram string
-
-        Keyword Arguments:
-            use_variable_names {bool} -- Use variable names as keys with data (default: {False})
-            filter_values {bool} -- Filter values (multiply/round) (default: {True})
-
-        Returns:
-            DecodedDataType -- Dictionary of result values
+    def decode(self,
+               raw: Union[str, bytes, bytearray],
+               use_variable_names=False,
+               filter_values=True) -> Tuple[Command, Dict[str, Any], int]:
         """
-        return decode(
+        Protocol-bound datagram encoding.
+
+        :param raw: Raw datagram
+        :param use_variable_names: Use variable names as data keys
+        :param filter_values: Apply filters to values
+        :return: command object, dictionary of values, frame number
+        :rtype: (Command, dict[str, Any], int)
+        """
+        return datagram_decode(
             raw=raw,
             protocol=self,
             use_variable_names=use_variable_names,
@@ -101,32 +105,27 @@ class Protocol:
         )
 
     def encode(self,
-               command: Union[int,
-                              str,
-                              Command],
-               data: DecodedDataType,
+               command: Union[int, str, Command],
+               data: Dict[str, Any],
                frame_number: int,
                use_variable_names=False,
-               filter_values=True) -> DatagramType:
-        """Protocol-oriented datagram encoding
+               filter_values=True) -> str:
+        """
+        Protocol-bound datagram encoding.
 
         Provides a wrapper for an out-of-class encoding function from `datagram` submodule.
         The wrapper searches for a command within the protocol and passes all existing parameters
         alongside the result as `command` argument.
 
-        Arguments:
-            command {Union[int,str,Command]} -- Command identifier or object
-            data {dict} -- Data dictionary
-            frame_number {int} -- Frame number
-
-        Keyword Arguments:
-            use_variable_names {bool} -- Use variable names as keys with data (default: {False})
-            filter_values {bool} -- Filter values (multiply/round) (default: {True})
-
-        Returns:
-            str -- Raw datagram string
+        :param command: Command identifier or `Command` object
+        :param data: Dictionary of values
+        :param frame_number: Frame number
+        :param use_variable_names: Use variable names as data keys
+        :param filter_values: Apply filters to values
+        :return: Raw datagram
+        :rtype: str
         """
-        return encode(
+        return datagram_encode(
             command=self.get_command(command),
             data=data,
             frame_number=frame_number,
@@ -135,16 +134,14 @@ class Protocol:
         )
 
     def get_command_by_id(self, command_id: int) -> Command:
-        """Get command by its ID
+        """
+        Get command definition object by its ID.
 
-        Arguments:
-            command_id {int} -- Command ID to search for
-
-        Raises:
-            CommandNotFoundException: Command not found by given ID
-
-        Returns:
-            Command -- Command object
+        :param command_id: Command ID
+        :return: `Command` object
+        :rtype: Command
+        :raises:
+            CommandNotFoundException: Command definition not found within protocol
         """
         for command in self.__commands:
             if command.command_id == command_id:
@@ -153,16 +150,14 @@ class Protocol:
         raise CommandNotFoundException(command_id)
 
     def get_command_by_name(self, name: str) -> Command:
-        """Get command by its name
+        """
+        Get command definition object by its name.
 
-        Arguments:
-            name {str} -- Command name to search for
-
-        Raises:
-            CommandNotFoundException: Command not found by given name
-
-        Returns:
-            Command -- Command object
+        :param name: Command name
+        :return: `Command` object
+        :rtype: Command
+        :raises:
+            CommandNotFoundException: Command definition not found within protocol
         """
         for command in self.__commands:
             if command.name == name:
@@ -171,16 +166,14 @@ class Protocol:
         raise CommandNotFoundException(name)
 
     def get_command(self, command: Union[int, str, Command]) -> Command:
-        """Get command by its ID/name (or cycle-return object)
+        """
+        Get command by its ID/name (or cycle-return `Command` object).
 
-        Arguments:
-            command {Union[int, str, Command]} -- Command ID/name/object
-
-        Raises:
-            TypeError: Bad argument type provided
-
-        Returns:
-            Command -- Command object
+        :param command: Command ID/name, `Command` object
+        :type command: int, str, Command
+        :return:
+        :raises:
+            HekrTypeError: Bad value type for `command` argument
         """
         if isinstance(command, Command):
             return command
@@ -193,7 +186,14 @@ class Protocol:
             "Argument 'command' (type %s) does not evaluate to any supported command type" %
             command)
 
-    def get_definition(self, filter_empty=True):
+    def get_definition_dict(self, filter_empty=True) -> Dict:
+        """
+        Returns protocol definition as Python dictionary.
+
+        :param filter_empty: Filter out empty values
+        :return: Protocol definition
+        :rtype: dict
+        """
         definition = {
             "commands": [
                 {
@@ -221,17 +221,30 @@ class Protocol:
         }
         return remove_none(definition) if filter_empty else definition
 
-    def print_definition(self, prefix: str = '', format:str='yaml'):
-        """Prints protocol definition in YAML format
-
-        Keyword Arguments:
-            sort {bool} -- Sort commands by frame types (default: {False})
-            prefix {str} -- What to prefix every line with (default: {''})
+    def get_definition_serialized(self, output_format: str = 'yaml') -> str:
         """
-        definition = self.get_definition()
-        if format == 'yaml':
-            output = yaml_dump(definition, Dumper=SafeDumper, default_flow_style=False, sort_keys=False)
-        elif format == 'json':
-            output = json_dumps(definition, ensure_ascii=False)
+        Returns protocol definition as serialized dictionary.
 
-        print(output)
+        :param output_format: Output format
+        :type output_format: str
+        :return: Serialized definition dictionary
+        :rtype: str
+        """
+        definition = self.get_definition_dict()
+        if output_format == 'yaml':
+            output = yaml_dump(definition, Dumper=SafeDumper, default_flow_style=False, sort_keys=False)
+        elif output_format == 'json':
+            output = json_dumps(definition, ensure_ascii=False)
+        else:
+            raise HekrValueError(variable='output_format', expected=['yaml', 'json'], got=output_format)
+
+        return output
+
+    def print_definition(self, output_format: str = 'yaml') -> None:
+        """
+        Prints protocol definition.
+
+        :param output_format: Output format
+        :type: output_format: str
+        """
+        print(self.get_definition_serialized(output_format=output_format))
