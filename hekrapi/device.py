@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Device class module for Hekr API"""
 import logging
+import threading
 
 from aiohttp import ClientSession, WSMsgType, client_exceptions
 from typing import Tuple, Union, Optional, AnyStr, Any, TYPE_CHECKING, List
@@ -225,26 +226,14 @@ class Device:
             await self.__cloud_session.close()
         return True
 
-    def process_response(self, response: AnyStr, message_id: int) -> Tuple[DeviceResponseState, str, Any]:
+    def process_response(self, response_dict: dict) -> Tuple[DeviceResponseState, str, Any]:
         """
         Handle incoming response packet (decode from existing string).
 
-        :param response: Raw response contents
+        :param response_dict: Response dictionary
         :param message_id: Message identifier (expect response)
         :return: Response state, response action, response contents
         """
-        if isinstance(response, bytes):
-            response_str = response.decode('utf-8')
-        else:
-            response_str = str(response)
-        response_str = response_str.strip()
-
-        _LOGGER.debug('Received response for device %s: %s', self, sensitive_info_filter(response_str))
-
-        response_dict = loads(response_str)
-
-        # @TODO: compare message ids to verify correct request sequence
-        # response_message_id = response_dict.get('msgId')
 
         data = response_dict
         action = response_dict.get('action')
@@ -295,7 +284,7 @@ class Device:
                     _LOGGER.debug('Command %s executed successfully on device %s', cur_command, self)
                     state = DeviceResponseState.SUCCESS
             else:
-                _LOGGER.debug('Command failed on device %s, raw response: %s', self, response)
+                _LOGGER.debug('Command failed on device %s, raw response: %s', self, response_dict)
                 state = DeviceResponseState.FAILURE
 
         elif action == 'devSend':
@@ -318,8 +307,7 @@ class Device:
     async def make_request(self, action: str,
                            params: dict = None,
                            message_id: int = None,
-                           connection_type: DeviceConnectionType = None)\
-            -> Tuple[DeviceResponseState, Optional[str], Optional[dict]]:
+                           connection_type: DeviceConnectionType = None) -> int:
         """
         Make request to device.
 
@@ -331,7 +319,7 @@ class Device:
         :type params: dict
         :type message_id: int
         :type connection_type: DeviceConnectionType
-        :return: Response state, response action, response data
+        :return: Message ID
         """
         connection_type = connection_type or self.default_connection_type
         if connection_type is None or connection_type not in self.available_connection_types:
@@ -346,6 +334,8 @@ class Device:
 
         _LOGGER.debug('Composed request for device %s, content: %s', self, sensitive_info_filter(request))
 
+        self.__last_message_id = message_id
+
         if connection_type == DeviceConnectionType.LOCAL:
             if not self.__local_endpoint:
                 await self.open_socket_local()
@@ -359,36 +349,44 @@ class Device:
                                  expected=self.available_connection_types,
                                  got=connection_type)
 
-        retries = 0
-        while retries < DEFAULT_REQUEST_RETRIES:
-            if connection_type == DeviceConnectionType.LOCAL:
-                data = await self.__local_endpoint.receive()
-            elif connection_type == DeviceConnectionType.CLOUD:
-                message = await self.__cloud_endpoint.receive()
-                if message.type == WSMsgType.TEXT:
-                    data = message.data
-                elif message.type == WSMsgType.BINARY:
-                    data = message.data.decode('utf-8')
-                else:
-                    return DeviceResponseState.FAILURE, None, message
+        return message_id
+
+    async def read_response(self, connection_type: DeviceConnectionType = None)\
+        -> Tuple[DeviceResponseState, Optional[str], Optional[dict]]:
+        """Read device response"""
+
+        connection_type = connection_type or self.default_connection_type
+        if connection_type is None or connection_type not in self.available_connection_types:
+            raise DeviceConnectionMissingException(device=self)
+
+        if connection_type == DeviceConnectionType.LOCAL:
+            data = await self.__local_endpoint.receive()
+        elif connection_type == DeviceConnectionType.CLOUD:
+            message = await self.__cloud_endpoint.receive()
+            if message.type == WSMsgType.TEXT:
+                data = message.data
+            elif message.type == WSMsgType.BINARY:
+                data = message.data.decode('utf-8')
             else:
-                raise HekrValueError(variable='connection_type',
-                                     expected=self.available_connection_types,
-                                     got=connection_type)
+                return DeviceResponseState.FAILURE, None, message
 
-            (state, action, data) = self.process_response(data, message_id)
 
-            if state != DeviceResponseState.WAIT_NEXT:
-                return state, action, data
+        else:
+            raise HekrValueError(variable='connection_type',
+                                    expected=self.available_connection_types,
+                                    got=connection_type)
 
-            retries += 1
 
-        _LOGGER.debug('Received too many %s responses, marking request result as invalid on device %s',
-                      DeviceResponseState.WAIT_NEXT.name, self)
-        return DeviceResponseState.FAILURE, None, None
+        response_str = (data.decode('utf-8') if isinstance(data, bytes) else str(data)).strip()
+
+        _LOGGER.debug('Received response for device %s: %s', self, sensitive_info_filter(response_str))
+
+        response_dict = loads(response_str)
+
+        return self.process_response(response_dict)
 
     async def heartbeat(self,
-                        connection_type: DeviceConnectionType = None):
+                        connection_type: DeviceConnectionType = None) -> int:
         """Send heartbeat message
 
         Keyword Arguments:
@@ -403,7 +401,7 @@ class Device:
             params=None,
             connection_type=connection_type)
 
-    async def authenticate(self, connection_type: DeviceConnectionType = None):
+    async def authenticate(self, connection_type: DeviceConnectionType = None) -> int:
         """Authenticate with the device
 
         Keyword Arguments:
@@ -435,7 +433,7 @@ class Device:
                       data: dict = None,
                       frame_number: int = None,
                       return_decoded: bool = True,
-                      connection_type: DeviceConnectionType = None):
+                      connection_type: DeviceConnectionType = None) -> int:
         """Execute device command and return response
 
         Arguments:
@@ -453,7 +451,7 @@ class Device:
             CommandFailedException: Command failed to execute due to socket timeout
 
         Returns:
-            dict -- decoded datagram values or full response dictionary
+            int -- message id for command request
         """
         if not isinstance(command, Command):
             if self.protocol:

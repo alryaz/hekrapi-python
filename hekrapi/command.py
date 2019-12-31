@@ -16,7 +16,8 @@ class Command:
                  frame_type: FrameType = FrameType.SEND,
                  name: str = None,
                  arguments: list = None,
-                 response_command_id: int = None):
+                 response_command_id: int = None,
+                 invoke_command_id: int = None):
         """
         Command class constructor.
 
@@ -25,6 +26,7 @@ class Command:
         :param name: Command name (rarely used externally).
         :param arguments: List of arguments bound to command.
         :param response_command_id: Command ID to wait for response from.
+        :param invoke_command_id: Command ID to expect invokation from.
         :type command_id: int
         :type frame_type: FrameType
         :type name: str
@@ -35,12 +37,14 @@ class Command:
         # circular checking prevents following private attributes
         # from being created automatically
         self.__response_command_id = None
+        self.__invoke_command_id = None
         self.__frame_type = None
 
         self.command_id = command_id
         self.name = name
-        self.response_command_id = response_command_id
         self.frame_type = frame_type
+        self.response_command_id = response_command_id
+        self.invoke_command_id = invoke_command_id
         self.arguments = arguments
 
     def __repr__(self) -> str:
@@ -126,6 +130,7 @@ class Command:
         :raises:
             HekrTypeError: Raised when the value is not coercible to a `FrameType` instance
             HekrValueError: Raised when the value is not `FrameType.SEND` when `response_command_id` attribute is set.
+            HekrValueError: Raised when the value is not `FrameType.RECEIVE` when `invoke_command_id` attribute is set.
         """
         try:
             if value is None:
@@ -147,6 +152,11 @@ class Command:
         if new_frame_type != FrameType.SEND and self.response_command_id is not None:
             raise HekrValueError(variable='frame_type',
                                  expected='`%s` due to `response_command_id` being set' % FrameType.SEND,
+                                 got=new_frame_type)
+
+        if new_frame_type != FrameType.RECEIVE and self.invoke_command_id is not None:
+            raise HekrValueError(variable='frame_type',
+                                 expected='`%s` due to `invoke_command_id` being set' % FrameType.RECEIVE,
                                  got=new_frame_type)
 
         self.__frame_type = new_frame_type
@@ -188,6 +198,33 @@ class Command:
         self.__arguments = value or []
 
     @property
+    def invoke_command_id(self) -> int:
+        """
+        Invoke command ID getter.
+
+        :return: int
+        """
+        return self.__response_command_id
+
+    @invoke_command_id.setter
+    def invoke_command_id(self, value):
+        if value is not None:
+            if self.frame_type is None or self.frame_type != FrameType.RECEIVE:
+                raise HekrValueError(variable='invoke_command_id',
+                                     expected='`None` due to `frame_type` not being set to `FrameType.RECEIVE` '
+                                              '(current value `%s`)' % self.frame_type,
+                                     got=value)
+            elif not isinstance(value, int):
+                raise HekrTypeError(variable='invoke_command_id',
+                                    expected=int,
+                                    got=type(value))
+            elif value < 0:
+                raise HekrValueError(variable='invoke_command_id',
+                                     expected='>= 0',
+                                     got=value)
+        self.__invoke_command_id = value
+
+    @property
     def response_command_id(self) -> int:
         """
         Response command ID getter.
@@ -199,7 +236,7 @@ class Command:
     @response_command_id.setter
     def response_command_id(self, value):
         if value is not None:
-            if self.frame_type is not None and self.frame_type != FrameType.SEND:
+            if self.frame_type is None or self.frame_type != FrameType.SEND:
                 raise HekrValueError(variable='response_command_id',
                                      expected='`None` due to `frame_type` not being set to `FrameType.SEND` '
                                               '(current value `%s`)' % self.frame_type,
