@@ -284,6 +284,17 @@ class _BaseConnector:
         await self.send_request(request_str)
         return message_id
 
+    async def authenticate(self, action: str) -> None:
+        _, request_str = self.generate_request(action)
+        await self.send_request(request_str)
+
+        response_str = await self.read_response()
+        message_id, state, action, data, hekr_device = self.process_response(response_str)
+        if state == DeviceResponseState.FAILURE:
+            await self.close_connection()
+            raise AuthenticationFailedException(reason='Endpoint %s rejected credentials (%s)' % (self, data))
+        _LOGGER.debug('Authentication on %s successful' % self)
+
     # attributes and methods to be overridden wholly by inherent connectors
     connection_type: DeviceConnectionType = NotImplemented
     connection_priority: int = NotImplemented
@@ -357,9 +368,10 @@ class LocalConnector(_BaseConnector):
         _LOGGER.debug('Opening local endpoint on device %s' % self._devices)
         self._endpoint = await open_remote_endpoint(self._host, self._port)
         _LOGGER.debug('Sending authentication request to %s' % self._devices)
-        message_id, request_str = self.generate_request(ACTION_DEVICE_AUTH_REQUEST, hekr_device=self._devices)
-        await self.send_request(request_str)
-        await self.read_response()
+
+        await self.authenticate(ACTION_DEVICE_AUTH_REQUEST)
+
+        _LOGGER.debug('Authentication request processed, local endpoint is open')
 
     async def close_connection(self) -> None:
         if self._endpoint is None:
@@ -447,10 +459,10 @@ class CloudConnector(_BaseConnector):
                 })
             self._session = session
             _LOGGER.debug('Cloud endpoint opened on device %s', self)
-            _, request_str = self.generate_request(ACTION_CLOUD_AUTH_REQUEST)
-            await self.send_request(request_str)
-            response_str = await self.read_response()
-            self.process_response(response_str)
+
+            await self.authenticate(ACTION_CLOUD_AUTH_REQUEST)
+
+            _LOGGER.debug('Authentication request processed, cloud endpoint is open')
 
         except client_exceptions.ClientConnectionError:
             _LOGGER.exception('Client connection could not be established')

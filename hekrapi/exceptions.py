@@ -80,17 +80,7 @@ class HeartbeatFailedException(HekrAPIFormattedException):
 
 class AuthenticationFailedException(HekrAPIFormattedException):
     """Base exception class for other authentication-related exceptions"""
-    default_message = "Authentication failed"
-
-
-class LocalAuthenticationFailedException(AuthenticationFailedException):
-    """Raised when local authentication fails"""
-    default_message = "Local authentication failed"
-
-
-class CloudAuthenticationFailedException(AuthenticationFailedException):
-    """Raised when cloud authentication fails"""
-    default_message = "Cloud authentication failed"
+    default_message = "Authentication failed: {reason}"
 
 
 class AccountUnauthenticatedException(HekrAPIFormattedException):
