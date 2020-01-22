@@ -2,9 +2,9 @@
 """ Basic protocol definition for a smart power meter """
 from enum import IntEnum
 
-from ..protocol import Protocol
-from ..command import Command, FrameType
 from ..argument import Argument
+from ..command import Command, FrameType
+from ..protocol import Protocol
 
 __all__ = [
     "VoltageWarning",
@@ -88,7 +88,7 @@ PROTOCOL = Protocol(
         Argument("option_prepaid_enabled", TO_BOOL, 1, "prepaidFunctionSw")
     ]),
     Command(9, FrameType.SEND, "setSw", arguments=[
-        Argument("switch_state", SwitchState, "sw", 1)
+        Argument("switch_state", SwitchState, 1, "sw")
     ]),
     Command(10, FrameType.SEND, "queryData", response_command_id=11),
     Command(11, FrameType.RECEIVE, "reportData", arguments=[

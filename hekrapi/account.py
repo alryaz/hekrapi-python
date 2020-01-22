@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 """Account class module for HekrAPI"""
+from json import JSONDecodeError, loads
 
-from typing import Union, Dict, List
+import logging
 from aiohttp import ClientSession
+from typing import Dict, Optional, Tuple
 
-from .device import Device
-from .const import DEFAULT_APPLICATION_ID, DEFAULT_WEBSOCKET_HOST
-from .exceptions import AccountUnauthenticatedException, AccountDevicesUpdateFailedException
+from .const import DEFAULT_APPLICATION_ID
+from .device import Device, CloudConnector
+from .exceptions import AccountUnauthenticatedException, AccountDevicesUpdateFailedException, HekrAPIException
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class Account:
@@ -26,13 +30,12 @@ class Account:
 
     BASE_URL = 'https://user-openapi.hekreu.me'
 
-    def __init__(self, username: str, password: Union[str, type(None)]=None,
-                 token: Union[str, type(None)]=None,
+    def __init__(self, username: Optional[str] = None, password: Optional[str] = None,
+                 token: Optional[str] = None,
                  application_id: str = DEFAULT_APPLICATION_ID):
         # @TODO: refactor after enabling authentication support
-        if not token:  # and not password:
-            raise ValueError(
-                "at least one of arguments (password, token) should be set")
+        if not token and not (username and password):
+            raise HekrAPIException("At least one authentication method (token, username/password) must be set up")
 
         self.application_id = application_id
 
@@ -40,7 +43,29 @@ class Account:
         self.__password = password
         self.__token = token
 
-        self.__devices = {}
+        self.__connectors = {}
+
+        self.__devices: Dict[str, Device] = {}
+
+    def get_connector(self, connect_host: str, connect_port: int = 186):
+        if not self.__token:
+            raise AccountUnauthenticatedException(account=self)
+
+        key = (connect_host, connect_port)
+        if key not in self.__connectors:
+            connector = CloudConnector(
+                token=self.__token,
+                connect_host=connect_host,
+                connect_port=connect_port,
+                application_id=self.application_id
+            )
+            self.__connectors[key] = connector
+            return connector
+        return self.__connectors[key]
+
+    @property
+    def connectors(self) -> Dict[Tuple[str, int], CloudConnector]:
+        return self.__connectors
 
     @property
     def devices(self) -> Dict[str, Device]:
@@ -51,31 +76,22 @@ class Account:
         """
         return self.__devices
 
+    def _generate_auth_header(self):
+        if not self.__token:
+            raise AccountUnauthenticatedException(account=self)
+        return {'Authorization': 'Bearer ' + self.__token}
+
     def authenticate(self):
         """Authenticate account with Hekr"""
 
-    async def update_devices(self):
-        """Update devices for account
-
-        Raises:
-            AccountUnauthenticatedException: Raised when attempting cloud data update
-                without performing primary authentication (or explicitly setting
-                authentication token at `__init__` stage)
-
-        Returns:
-            int -- New devices found (that do not exist within the __devices attribute)
-        """
-
-        if not self.__token:
-            raise AccountUnauthenticatedException(account=self)
-
+    async def get_devices(self) -> Dict[str, dict]:
+        auth_header = self._generate_auth_header()
         base_url_devices = self.BASE_URL + '/devices?size={}&page={}'
 
         request_devices = 20
         current_page = 0
 
-        new_devices = {}
-
+        devices_info = dict()
         async with ClientSession() as session:
             more_devices = True
             while more_devices:
@@ -84,44 +100,51 @@ class Account:
                     current_page
                 )
 
-                async with session.get(
-                        request_url,
-                        headers={'Authorization': 'Bearer ' + self.__token}
-                ) as response:
-                    response_json = await response.json()
+                async with session.get(request_url, headers=auth_header) as response:
+                    content = await response.read()
+                    _LOGGER.debug('Received response (%d) for account %s: %s' % (response.status, self, content))
+                    try:
+                        response_list = loads(content)
+                    except JSONDecodeError:
+                        raise AccountDevicesUpdateFailedException(account=self,
+                                                                  response=response,
+                                                                  reason='Received non-JSON response')
 
                     if response.status != 200:
                         await session.close()
-                        if response.status == 403:
-                            raise AccountDevicesUpdateFailedException(account=self, response=response, reason='Account credentials incorrect')
-                        else:
-                            raise AccountDevicesUpdateFailedException(account=self, response=response, reason='Unknown HTTP error')
+                        reason = 'Account credentials incorrect' if response.status in (401, 403) \
+                            else 'Unknown HTTP error'
+                        raise AccountDevicesUpdateFailedException(account=self, response=response, reason=reason)
 
-                    more_devices = (len(response_json) == request_devices)
+                    more_devices = (len(response_list) == request_devices)
 
-                    for device_attributes in response_json:
-                        device_id = device_attributes['devTid']
-                        connect_host = device_attributes.get('dcInfo', {}).get('connectHost', DEFAULT_WEBSOCKET_HOST)
+                    devices_info.update({
+                        device_info['devTid']: device_info
+                        for device_info in response_list
+                    })
 
-                        if device_id in self.__devices:
-                            self.__devices[device_id].set_control_key(device_attributes['ctrlKey'])
-                            self.__devices[device_id].set_cloud_settings(
-                                cloud_token=self.__token,
-                                cloud_domain=connect_host)
-                        else:
-                            device = Device(
-                                device_id=device_id,
-                                control_key=device_attributes['ctrlKey'],
-                                host=device_attributes['lanIp'],
-                                application_id=self.application_id
-                            )
-                            device.set_cloud_settings(
-                                cloud_token=self.__token,
-                                cloud_domain=connect_host
-                            )
-                            new_devices[device_id] = device
+        return devices_info
 
-        if new_devices:
-            self.__devices.update(new_devices)
+    async def update_devices(self, devices_info: Optional[Dict[str, dict]] = None) -> Dict[str, Device]:
+        """
+        Get devices, and update attributes if an object already exists, or create new ones based on retrieved info.
+        :return: Dictionary with new devices indexed by device ID
+        """
 
-        return len(new_devices)
+        if devices_info is None:
+            devices_info = await self.get_devices()
+
+        devices = {}
+        for device_id, device_attributes in devices_info:
+            if device_id in self.__devices:
+                self.__devices[device_id].device_info = device_attributes
+            else:
+                device = Device(device_id=device_id, control_key=device_attributes['ctrlKey'])
+                device.connector = self.get_connector(connect_host=device_attributes['dcInfo']['connectHost'])
+
+                devices[device_id] = device
+
+        if devices:
+            self.__devices.update(devices)
+
+        return devices

@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=too-many-arguments
 """Protocol class module for Hekr API"""
-from yaml import dump as yaml_dump, load as yaml_load, SafeLoader, SafeDumper
 from json import dumps as json_dumps
 
-from typing import Union, List, Tuple, Dict, Any
+from typing import Union, List, Dict
+from yaml import dump as yaml_dump, SafeDumper
 
 from .command import Command
-from .exceptions import CommandNotFoundException, HekrTypeError, HekrValueError
-from .helpers import datagram_encode, datagram_decode
+from .const import FRAME_START_IDENTIFICATION
+from .exceptions import CommandNotFoundException, HekrTypeError, HekrValueError, InvalidMessagePrefixException, \
+    InvalidMessageLengthException, InvalidMessageChecksumException, InvalidMessageFrameTypeException
+from .types import CommandData, AnyCommand, DecodeResult
 
 
 def remove_none(obj):
@@ -87,37 +89,61 @@ class Protocol:
     def decode(self,
                raw: Union[str, bytes, bytearray],
                use_variable_names=False,
-               filter_values=True) -> Tuple[Command, Dict[str, Any], int]:
+               filter_values=True) -> DecodeResult:
         """
-        Protocol-bound datagram encoding.
-
+        Decode raw datagram
         :param raw: Raw datagram
         :param use_variable_names: Use variable names as data keys
         :param filter_values: Apply filters to values
+        :type: protocol: Protocol
+        :type: raw: str, bytes, bytearray
+        :type: use_variable_names: bool
+        :type: filter_values: bool
         :return: command object, dictionary of values, frame number
         :rtype: (Command, dict[str, Any], int)
         """
-        return datagram_decode(
-            raw=raw,
-            protocol=self,
-            use_variable_names=use_variable_names,
-            filter_values=filter_values
-        )
+        if isinstance(raw, str):
+            decoded = bytearray.fromhex(raw)
+        elif isinstance(raw, bytes):
+            decoded = bytearray(raw)
+        elif isinstance(raw, bytearray):
+            decoded = raw
+        else:
+            raise HekrTypeError(variable='raw', expected=[str, bytearray], got=type(raw))
+
+        if decoded[0] != FRAME_START_IDENTIFICATION:
+            raise InvalidMessagePrefixException(raw)
+
+        frame_length = decoded[1]
+        if frame_length != len(decoded):
+            raise InvalidMessageLengthException(raw)
+
+        checksum = decoded[-1]
+        current_checksum = sum(decoded[:-1]) % 0x100
+        if checksum != current_checksum:
+            raise InvalidMessageChecksumException(raw)
+
+        frame_type = decoded[2]
+        command_id = decoded[4]
+        command = self.get_command_by_id(command_id)
+        if frame_type != command.frame_type.value:
+            raise InvalidMessageFrameTypeException(raw)
+
+        frame_number = decoded[3]
+
+        data = command.decode(decoded[5:-1], use_variable_names, filter_values)
+
+        return command, data, frame_number
 
     def encode(self,
-               command: Union[int, str, Command],
-               data: Dict[str, Any],
-               frame_number: int,
+               command: AnyCommand,
+               data: CommandData = None,
+               frame_number: int = 1,
                use_variable_names=False,
                filter_values=True) -> str:
         """
-        Protocol-bound datagram encoding.
-
-        Provides a wrapper for an out-of-class encoding function from `datagram` submodule.
-        The wrapper searches for a command within the protocol and passes all existing parameters
-        alongside the result as `command` argument.
-
-        :param command: Command identifier or `Command` object
+        Encode data into raw datagram.
+        :param command: Command object/ID/name
         :param data: Dictionary of values
         :param frame_number: Frame number
         :param use_variable_names: Use variable names as data keys
@@ -125,13 +151,27 @@ class Protocol:
         :return: Raw datagram
         :rtype: str
         """
-        return datagram_encode(
-            command=self.get_command(command),
+        command = self.get_command(command)
+
+        if not data:
+            data = {}
+
+        encoded_command = command.encode(
             data=data,
-            frame_number=frame_number,
             use_variable_names=use_variable_names,
             filter_values=filter_values
         )
+
+        raw = bytearray()
+        raw.append(FRAME_START_IDENTIFICATION)
+        raw.append(command.frame_type.value)
+        raw.append(frame_number % 256)
+        raw.append(command.command_id)
+        raw.extend(encoded_command)
+        raw.insert(1, len(raw) + 2)
+        raw.append(sum(raw) % 0x100)
+
+        return raw.hex().upper()
 
     def get_command_by_id(self, command_id: int) -> Command:
         """
@@ -165,7 +205,7 @@ class Protocol:
 
         raise CommandNotFoundException(name)
 
-    def get_command(self, command: Union[int, str, Command]) -> Command:
+    def get_command(self, command: AnyCommand) -> Command:
         """
         Get command by its ID/name (or cycle-return `Command` object).
 

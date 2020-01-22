@@ -2,7 +2,7 @@
 """Exception classes for Hekr API"""
 
 
-class HekrAPIException(Exception):
+class HekrAPIException(BaseException):
     pass
 
 

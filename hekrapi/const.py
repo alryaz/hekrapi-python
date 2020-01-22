@@ -16,9 +16,10 @@ class FrameType(Enum):
 #: Device response states
 class DeviceResponseState(Enum):
     """Response state of `make_request`"""
-    SUCCESS = 0
-    FAILURE = 1
-    WAIT_NEXT = 2
+    UNKNOWN = 0
+    SUCCESS = 1
+    FAILURE = 2
+    WAIT_NEXT = 3
 
 
 class DeviceConnectionType(Enum):
@@ -43,3 +44,14 @@ DEFAULT_RETRY_DELAY = 1
 
 #: Default host for controlling devices via websockets
 DEFAULT_WEBSOCKET_HOST = 'fra-hub.hekreu.me'
+DEFAULT_WEBSOCKET_PORT = 186
+
+ACTION_DEVICE_AUTH_REQUEST = 'appDevAuth'
+ACTION_DEVICE_AUTH_RESPONSE = 'appDevAuthResp'
+ACTION_CLOUD_AUTH_REQUEST = 'appLogin'
+ACTION_CLOUD_AUTH_RESPONSE = 'appLoginResp'
+ACTION_HEARTBEAT_REQUEST = 'heartbeat'
+ACTION_HEARTBEAT_RESPONSE = 'heartbeatResp'
+ACTION_COMMAND_REQUEST = 'appSend'
+ACTION_COMMAND_RESPONSE = 'appSendResp'
+ACTION_DEVICE_MESSAGE = 'devSend'

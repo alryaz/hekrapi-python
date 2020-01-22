@@ -4,8 +4,10 @@
 from typing import List
 
 from .argument import Argument
-from .exceptions import HekrTypeError, HekrValueError
 from .const import FrameType
+from .exceptions import HekrTypeError, HekrValueError, InvalidDataMissingKeyException, InvalidDataGreaterThanException, \
+    InvalidDataLessThanException
+from .types import CommandData
 
 
 class Command:
@@ -250,3 +252,72 @@ class Command:
                                      expected='>= 0',
                                      got=value)
         self.__response_command_id = value
+
+    def encode(self, data: dict, use_variable_names: bool = False, filter_values: bool = True) -> bytes:
+        """Encode arguments into an array of bytes."""
+        result = bytes()
+        for argument in self.arguments:
+            key = argument.variable if use_variable_names else argument.name
+            value_input = data.get(key, None)
+
+            if value_input is None:
+                raise InvalidDataMissingKeyException(data_key=key)
+
+            if argument.value_min is not None and argument.value_min > value_input:
+                raise InvalidDataLessThanException(
+                    data_key=key,
+                    value=value_input,
+                    value_min=argument.value_min)
+
+            if argument.value_max is not None and argument.value_max < value_input:
+                raise InvalidDataGreaterThanException(
+                    data_key=key,
+                    value=value_input,
+                    value_max=argument.value_max)
+
+            if filter_values:
+                if argument.multiplier:
+                    value_input /= argument.multiplier
+
+                value_input = round(value_input)
+
+            # @TODO: make better performing solution
+            result += value_input.to_bytes(
+                argument.byte_length,
+                byteorder='big',
+                signed=False)
+
+        return result
+
+    def decode(self, data: bytes, use_variable_names: bool = False, filter_values: bool = True,
+               ignore_extra: bool = False) -> CommandData:
+        """Decode passed data"""
+        result = {}
+        current_pos = 0
+        data_length = len(data)
+        for argument in self.arguments:
+            key = argument.variable if use_variable_names else argument.name
+
+            next_pos = current_pos + argument.byte_length
+            if next_pos > data_length:
+                raise InvalidDataMissingKeyException(data_key=key)
+
+            value_output = int.from_bytes(data[current_pos:next_pos], byteorder='big', signed=False)
+
+            # @TODO: decide on whether clamping/exceptions are required on invalid data
+
+            if filter_values:
+                if argument.multiplier is not None:
+                    value_output *= argument.multiplier
+                    if argument.decimals is not None:
+                        value_output = round(value_output, argument.decimals)
+
+                value_output = argument.type_output(value_output)
+
+            result[key] = value_output
+            current_pos = next_pos
+
+        if not ignore_extra and current_pos < data_length:
+            raise Exception('Provided data is longer than expected for command.')
+
+        return result
