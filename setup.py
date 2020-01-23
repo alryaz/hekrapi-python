@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from distutils.core import setup
 
-version = 'v0.1.0'
+version = 'v0.1.1'
 setup(
     name='hekrapi',
     packages=['hekrapi', 'hekrapi.protocols'],

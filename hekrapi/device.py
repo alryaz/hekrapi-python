@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """Device class module for Hekr API"""
-from json import dumps, loads
-
 import asyncio
 import logging
-from aiohttp import ClientSession, WSMsgType, client_exceptions
+from json import dumps, loads
 from typing import Optional, Any, TYPE_CHECKING, Dict, Set, Callable
+
+from aiohttp import ClientSession, WSMsgType, client_exceptions
 
 from .aioudp import RemoteEndpoint, open_remote_endpoint
 from .command import Command
@@ -114,7 +114,7 @@ class _BaseConnector:
     def __init__(self, device: Optional['Device'] = None, application_id: str = DEFAULT_APPLICATION_ID):
         self._last_message_id = 0
         self._message_devices: Dict[int, 'Device'] = dict()
-        self._devices = set()
+        self._devices: Set['Device'] = set()
         self._listener = None
         self._application_id = application_id
 
@@ -348,16 +348,12 @@ class LocalConnector(_BaseConnector):
     def attach_device(self, hekr_device: 'Device'):
         if self._devices:
             raise HekrAPIException('Cannot attach more than one device to a local socket')
-        self._devices = hekr_device
+        super().attach_device(hekr_device)
 
-    def detach_device(self, hekr_device: 'Device'):
-        if self._devices is None or hekr_device.device_id != self._devices.device_id:
-            raise HekrAPIException('Cannot detach an unattached device (%s)' % hekr_device)
-        self._devices = None
-
-    @property
-    def devices(self) -> DevicesDict:
-        return {self._devices.device_id: self._devices}
+    def _get_request_base(self, action: str, hekr_device: Optional['Device'] = None, message_id: int = None) -> (
+            int, Dict[str, Any]):
+        hekr_device = next(iter(self._devices))
+        return super()._get_request_base(action, hekr_device, message_id)
 
     async def open_connection(self) -> None:
         if self.is_connected:
