@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from json import dumps, loads
-from typing import Optional, Any, TYPE_CHECKING, Dict, Set, Callable
+from typing import Optional, Any, TYPE_CHECKING, Dict, Set, Callable, Union
 
 from aiohttp import ClientSession, WSMsgType, client_exceptions
 
@@ -38,7 +38,7 @@ class Listener:
     def __init__(self, connector: '_BaseConnector',
                  callback_task_function: callable = None,
                  callback_exec_function: callable = None,
-                 auto_reconnect: bool = False):
+                 auto_reconnect: Union[int, float, bool] = False):
         self.connector = connector
         self._callbacks: Set[HekrCallback] = set()
         self._running: Optional[asyncio.Task] = None
@@ -103,6 +103,9 @@ class Listener:
             _LOGGER.exception('Listener encountered an exception')
         finally:
             if self._auto_reconnect:
+                # wait two seconds by default
+                await asyncio.sleep(1. if self._auto_reconnect is True else self._auto_reconnect)
+
                 self._running = self._create_task_func(self.start_receiving())
             else:
                 self._running = None
