@@ -8,7 +8,7 @@ class HekrAPIException(BaseException):
 
 class HekrAPIFormattedException(HekrAPIException):
     """Base exception class for all HekrAPI exceptions"""
-    default_message = 'HekrAPI Exception occured'
+    default_message = 'HekrAPI Exception occurred'
 
     def __init__(self, *args, **kwargs):
         self.arguments = list(args)
@@ -80,17 +80,7 @@ class HeartbeatFailedException(HekrAPIFormattedException):
 
 class AuthenticationFailedException(HekrAPIFormattedException):
     """Base exception class for other authentication-related exceptions"""
-    default_message = "Authentication failed"
-
-
-class LocalAuthenticationFailedException(AuthenticationFailedException):
-    """Raised when local authentication fails"""
-    default_message = "Local authentication failed"
-
-
-class CloudAuthenticationFailedException(AuthenticationFailedException):
-    """Raised when cloud authentication fails"""
-    default_message = "Cloud authentication failed"
+    default_message = "Authentication failed: {reason}"
 
 
 class AccountUnauthenticatedException(HekrAPIFormattedException):

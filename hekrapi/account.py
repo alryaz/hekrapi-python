@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """Account class module for HekrAPI"""
-from json import JSONDecodeError, loads
-
 import logging
-from aiohttp import ClientSession
+from json import JSONDecodeError, loads
 from typing import Dict, Optional, Tuple
+
+from aiohttp import ClientSession
 
 from .const import DEFAULT_APPLICATION_ID
 from .device import Device, CloudConnector

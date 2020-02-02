@@ -7,7 +7,7 @@ from typing import Optional, Any, TYPE_CHECKING, Dict, Set, Callable
 
 from aiohttp import ClientSession, WSMsgType, client_exceptions
 
-from .aioudp import RemoteEndpoint, open_remote_endpoint
+from .aioudp import open_remote_endpoint
 from .command import Command
 from .const import (
     DEFAULT_APPLICATION_ID,
@@ -24,6 +24,7 @@ from .types import MessageID, Action, ProcessedResponse, HekrCallback, DeviceRes
 if TYPE_CHECKING:
     from .protocol import Protocol
     from aiohttp.client import _WSRequestContextManager
+    from .aioudp import RemoteEndpoint
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ class _BaseConnector:
     def __init__(self, device: Optional['Device'] = None, application_id: str = DEFAULT_APPLICATION_ID):
         self._last_message_id = 0
         self._message_devices: Dict[int, 'Device'] = dict()
-        self._devices = set()
+        self._devices: Set['Device'] = set()
         self._listener = None
         self._application_id = application_id
 
@@ -295,6 +296,17 @@ class _BaseConnector:
         await self.send_request(request_str)
         return message_id
 
+    async def authenticate(self, action: str) -> None:
+        _, request_str = self.generate_request(action)
+        await self.send_request(request_str)
+
+        response_str = await self.read_response()
+        message_id, state, action, data, hekr_device = self.process_response(response_str)
+        if state == DeviceResponseState.FAILURE:
+            await self.close_connection()
+            raise AuthenticationFailedException(reason='Endpoint %s rejected credentials (%s)' % (self, data))
+        _LOGGER.debug('Authentication on %s successful' % self)
+
     # attributes and methods to be overridden wholly by inherent connectors
     connection_type: DeviceConnectionType = NotImplemented
     connection_priority: int = NotImplemented
@@ -348,16 +360,12 @@ class LocalConnector(_BaseConnector):
     def attach_device(self, hekr_device: 'Device'):
         if self._devices:
             raise HekrAPIException('Cannot attach more than one device to a local socket')
-        self._devices = hekr_device
+        super().attach_device(hekr_device)
 
-    def detach_device(self, hekr_device: 'Device'):
-        if self._devices is None or hekr_device.device_id != self._devices.device_id:
-            raise HekrAPIException('Cannot detach an unattached device (%s)' % hekr_device)
-        self._devices = None
-
-    @property
-    def devices(self) -> DevicesDict:
-        return {self._devices.device_id: self._devices}
+    def _get_request_base(self, action: str, hekr_device: Optional['Device'] = None, message_id: int = None) -> (
+            int, Dict[str, Any]):
+        hekr_device = next(iter(self._devices))
+        return super()._get_request_base(action, hekr_device, message_id)
 
     async def open_connection(self) -> None:
         if self.is_connected:
@@ -368,9 +376,10 @@ class LocalConnector(_BaseConnector):
         _LOGGER.debug('Opening local endpoint on device %s' % self._devices)
         self._endpoint = await open_remote_endpoint(self._host, self._port)
         _LOGGER.debug('Sending authentication request to %s' % self._devices)
-        message_id, request_str = self.generate_request(ACTION_DEVICE_AUTH_REQUEST, hekr_device=self._devices)
-        await self.send_request(request_str)
-        await self.read_response()
+
+        await self.authenticate(ACTION_DEVICE_AUTH_REQUEST)
+
+        _LOGGER.debug('Authentication request processed, local endpoint is open')
 
     async def close_connection(self) -> None:
         if self._endpoint is None:
@@ -458,10 +467,10 @@ class CloudConnector(_BaseConnector):
                 })
             self._session = session
             _LOGGER.debug('Cloud endpoint opened on device %s', self)
-            _, request_str = self.generate_request(ACTION_CLOUD_AUTH_REQUEST)
-            await self.send_request(request_str)
-            response_str = await self.read_response()
-            self.process_response(response_str)
+
+            await self.authenticate(ACTION_CLOUD_AUTH_REQUEST)
+
+            _LOGGER.debug('Authentication request processed, cloud endpoint is open')
 
         except client_exceptions.ClientConnectionError:
             _LOGGER.exception('Client connection could not be established')
