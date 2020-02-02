@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """Device class module for Hekr API"""
-from json import dumps, loads
-
 import asyncio
 import logging
-from aiohttp import ClientSession, WSMsgType, client_exceptions
+from json import dumps, loads
 from typing import Optional, Any, TYPE_CHECKING, Dict, Set, Callable
+
+from aiohttp import ClientSession, WSMsgType, client_exceptions
 
 from .aioudp import RemoteEndpoint, open_remote_endpoint
 from .command import Command
@@ -36,10 +36,13 @@ class Listener:
 
     def __init__(self, connector: '_BaseConnector',
                  callback_task_function: callable = None,
-                 callback_exec_function: callable = None):
+                 callback_exec_function: callable = None,
+                 auto_reconnect: bool = False):
         self.connector = connector
         self._callbacks: Set[HekrCallback] = set()
         self._running: Optional[asyncio.Task] = None
+        self._auto_reconnect = auto_reconnect
+        self._create_task_func = None
 
         self._callback_exec_function = self._get_loop_run_executor if callback_exec_function is None \
             else callback_exec_function
@@ -58,7 +61,7 @@ class Listener:
 
     @property
     def is_running(self):
-        return self._running is not None and not self._running.cancelled()
+        return self._running is not None and not self._running.cancelled() and not self._running.done()
 
     async def start_receiving(self):
         _LOGGER.debug('Start receiving on %s' % self)
@@ -92,14 +95,22 @@ class Listener:
                             callback_exec_function(callback, hekr_device, message_id, state, action, data)
 
         except asyncio.CancelledError:
-            _LOGGER.debug('Closing listener')
-        except Exception as e:
-            _LOGGER.exception('Caught exception')
+            _LOGGER.debug('Closing listener by cancel')
+        except IOError:
+            _LOGGER.error('Connector appears to be closed')
+        except BaseException:
+            _LOGGER.exception('Listener encountered an exception')
         finally:
-            _LOGGER.debug('Finally on listener closing')
+            if self._auto_reconnect:
+                self._running = self._create_task_func(self.start_receiving())
+            else:
+                self._running = None
 
     def start(self, create_task_func: Callable = asyncio.create_task):
+        if self.is_running:
+            raise HekrAPIException('Cannot start an already running listener, stop it first')
         _LOGGER.debug('Starting listener %s with factory: %s' % (self, create_task_func))
+        self._create_task_func = create_task_func
         self._running = create_task_func(self.start_receiving())
 
     def stop(self):
