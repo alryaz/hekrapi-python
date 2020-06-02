@@ -276,10 +276,12 @@ class Command:
                     value_max=argument.value_max)
 
             if filter_values:
+                print('filtering value for', argument.name, value_input)
                 if argument.multiplier:
                     value_input /= argument.multiplier
 
-                value_input = round(value_input)
+                value_input = argument.type_input(value_input)
+                print('new value', argument.name, value_input)
 
             # @TODO: make better performing solution
             result += value_input.to_bytes(
@@ -307,12 +309,12 @@ class Command:
             # @TODO: decide on whether clamping/exceptions are required on invalid data
 
             if filter_values:
+                value_output = argument.type_output(value_output)
+
                 if argument.multiplier is not None:
                     value_output *= argument.multiplier
                     if argument.decimals is not None:
                         value_output = round(value_output, argument.decimals)
-
-                value_output = argument.type_output(value_output)
 
             result[key] = value_output
             current_pos = next_pos

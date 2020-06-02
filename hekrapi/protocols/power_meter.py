@@ -39,10 +39,24 @@ class SwitchState(IntEnum):
     OFF = 1
     FAILURE = 2
 
+def signed_float(threshold, type_input=int, type_output=float):
+    """ Generates a signed float converter. """
+    def convert_input(value):
+        """ Adds negative value to threshold to restore original """
+        value = type_input(value)
+        return threshold-value if value < 0 else value
+
+    def convert_output(value):
+        """ Inverts sign if original is equal to or greater than threshold """
+        value = type_output(value)
+        return value if value < threshold else threshold-value
+
+    return (convert_input, convert_output)
 
 TO_FLOAT = (int, float)
 TO_BOOL = (int, bool)
 TO_STR = (int, str)
+TO_SIGNED_FLOAT = signed_float(1000000)
 
 PROTOCOL = Protocol(
     Command(0, FrameType.SEND, "queryDev", response_command_id=1),
@@ -98,15 +112,15 @@ PROTOCOL = Protocol(
         Argument("voltage_1", TO_FLOAT, 2, "I1", multiplier=0.1, value_min=0, value_max=999.9),
         Argument("voltage_2", TO_FLOAT, 2, "I2", multiplier=0.1, value_min=0, value_max=999.9),
         Argument("voltage_3", TO_FLOAT, 2, "I3", multiplier=0.1, value_min=0, value_max=999.9),
-        Argument("total_reactive_power", TO_FLOAT, 3, "total_Reactive_Power", multiplier=0.0001, value_min=0, value_max=199.9999),
-        Argument("reactive_power_1", TO_FLOAT, 3, "reactive_Power1", multiplier=0.0001, value_min=0, value_max=199.9999),
-        Argument("reactive_power_2", TO_FLOAT, 3, "reactive_Power2", multiplier=0.0001, value_min=0, value_max=199.9999),
-        Argument("reactive_power_3", TO_FLOAT, 3, "reactive_Power3", multiplier=0.0001, value_min=0, value_max=199.9999),
-        Argument("total_active_power", TO_FLOAT, 3, "total_Active_Power", multiplier=0.0001, value_min=0, value_max=199.9999),
-        Argument("active_power_1", TO_FLOAT, 3, "active_Power1", multiplier=0.0001, value_min=0, value_max=199.9999),
-        Argument("active_power_2", TO_FLOAT, 3, "active_Power2", multiplier=0.0001, value_min=0, value_max=199.9999),
-        Argument("active_power_3", TO_FLOAT, 3, "active_Power3", multiplier=0.0001, value_min=0, value_max=199.9999),
-        Argument("total_power_factor", TO_FLOAT, 2, "total_Constant", multiplier=0.0001, value_min=0, value_max=199.9999),
+        Argument("total_reactive_power", TO_SIGNED_FLOAT, 3, "total_Reactive_Power", multiplier=0.0001, value_min=-99.9999, value_max=99.9999),
+        Argument("reactive_power_1", TO_SIGNED_FLOAT, 3, "reactive_Power1", multiplier=0.0001, value_min=-99.9999, value_max=99.9999),
+        Argument("reactive_power_2", TO_SIGNED_FLOAT, 3, "reactive_Power2", multiplier=0.0001, value_min=-99.9999, value_max=99.9999),
+        Argument("reactive_power_3", TO_SIGNED_FLOAT, 3, "reactive_Power3", multiplier=0.0001, value_min=-99.9999, value_max=99.9999),
+        Argument("total_active_power", TO_SIGNED_FLOAT, 3, "total_Active_Power", multiplier=0.0001, value_min=-99.9999, value_max=99.9999),
+        Argument("active_power_1", TO_SIGNED_FLOAT, 3, "active_Power1", multiplier=0.0001, value_min=-99.9999, value_max=99.9999),
+        Argument("active_power_2", TO_SIGNED_FLOAT, 3, "active_Power2", multiplier=0.0001, value_min=-99.9999, value_max=99.9999),
+        Argument("active_power_3", TO_SIGNED_FLOAT, 3, "active_Power3", multiplier=0.0001, value_min=-99.9999, value_max=99.9999),
+        Argument("total_power_factor", TO_SIGNED_FLOAT, 2, "total_Constant", multiplier=0.0001, value_min=-99.9999, value_max=99.9999),
         Argument("power_factor_1", TO_FLOAT, 2, "constant1", multiplier=0.001, value_min=0, value_max=9.999),
         Argument("power_factor_2", TO_FLOAT, 2, "constant2", multiplier=0.001, value_min=0, value_max=9.999),
         Argument("power_factor_3", TO_FLOAT, 2, "constant3", multiplier=0.001, value_min=0, value_max=9.999),
