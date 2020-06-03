@@ -65,7 +65,7 @@ PROTOCOL = Protocol(
         Argument("switch_state", TO_BOOL, 1, "sw"),
         Argument("total_energy_consumed", TO_FLOAT, 4, "total_Energy", multiplier=0.01),
         Argument("warning_voltage", VoltageWarning, 1, "fault_Over_U"),
-        Argument("current_energy_consumption", TO_FLOAT, 3, "total_Active_power", multiplier=0.0001),
+        Argument("current_energy_consumption", TO_SIGNED_FLOAT, 3, "total_Active_power", multiplier=0.0001),
         Argument("warning_current", CurrentWarning, 1, "fault_Over_I"),
         Argument("delay_timer", int, 2, "tmCd_M", value_min=0, value_max=1440),
         Argument("delay_enabled", TO_BOOL, 1, "tmCdO_Sw"),
