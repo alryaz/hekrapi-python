@@ -4,6 +4,7 @@ __all__ = [
     'Account',
 ]
 import logging
+import asyncio
 from json import JSONDecodeError, loads
 from typing import Dict, Optional, Tuple, NoReturn
 from datetime import datetime, timedelta
@@ -58,7 +59,7 @@ class Account:
 
         self.reauth_on_fail = reauth_on_fail
 
-        self.__connectors = {}
+        self.__connectors: Dict[str, CloudConnector] = {}
 
         self.__devices: Dict[str, Device] = {}
 
@@ -147,7 +148,7 @@ class Account:
             return await self._do_request(url, headers=headers, account=self,
                                         authenticated=authenticated, **request_args)
         except AuthenticationFailedException as e:
-            raise AccountUnauthenticatedException(account=self, **e.arguments)
+            raise AccountUnauthenticatedException(account=self, *e.arguments)
 
     @classmethod
     async def refresh_authentication_token(cls, refresh_token: str, expires_in: int = 86400):
@@ -181,12 +182,14 @@ class Account:
         _LOGGER.info('Successful token refresh for account %s' % self)
         self._process_auth_response(response)
 
+        await self.update_connectors()
+
     async def authenticate(self, pid: str = '00000000000', client_type: str = 'ANDROID',
                            app_version: str = '1.0.0:0', app_name: str = "hekrapi",
                            attempt_refresh: bool = True) -> NoReturn:
         """Authenticate account with Hekr"""
         if attempt_refresh and self.__refresh_token:
-            if datetime.now() < self.expires_at:
+            if datetime.now() < self._refresh_token_expires_at:
                 try:
                     await self.refresh_authentication()
                     return
@@ -214,6 +217,8 @@ class Account:
             )
             _LOGGER.info('Successful login for account %s' % self)
             self._process_auth_response(response)
+
+            await self.update_connectors()
         except:
             raise AuthenticationFailedException(account=self)
 
@@ -258,6 +263,19 @@ class Account:
                     })
 
         return devices_info
+
+    async def update_connectors(self, graceful: bool = True):
+        if graceful:
+            tasks = [
+                connector.update_token_gracefully(self.__access_token)
+                for connector in self.__connectors.values()
+            ]
+            if tasks:
+                await asyncio.wait(tasks)
+
+        else:
+            for connector in self.__connectors.values():
+                connector.update_token(self.__access_token)
 
     async def update_devices(self, devices_info: Optional[Dict[str, dict]] = None) -> Dict[str, Device]:
         """

@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from .protocol import Protocol
     from aiohttp.client import _WSRequestContextManager
     from .aioudp import RemoteEndpoint
+    from .account import Account
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class Listener:
         self._running: Optional[asyncio.Task] = None
         self._auto_reconnect = auto_reconnect
         self._create_task_func = None
+        self._stopped: bool = False
 
         self._callback_exec_function = self._get_loop_run_executor if callback_exec_function is None \
             else callback_exec_function
@@ -102,7 +104,7 @@ class Listener:
         except BaseException:
             _LOGGER.exception('Listener encountered an exception')
         finally:
-            if self._auto_reconnect:
+            if self._auto_reconnect and not self._stopped:
                 # wait two seconds by default
                 await asyncio.sleep(1. if self._auto_reconnect is True else self._auto_reconnect)
 
@@ -112,14 +114,19 @@ class Listener:
 
     def start(self, create_task_func: Optional[Callable] = None):
         if create_task_func is None:
-            create_task_func = asyncio.create_task
+            if self._create_task_func:
+                create_task_func = self._create_task_func
+            else:
+                create_task_func = asyncio.create_task
         if self.is_running:
             raise HekrAPIException('Cannot start an already running listener, stop it first')
         _LOGGER.debug('Starting listener %s with factory: %s' % (self, create_task_func))
         self._create_task_func = create_task_func
+        self._stopped = False
         self._running = create_task_func(self.start_receiving())
 
     def stop(self):
+        self._stopped = True
         if self.is_running:
             self._running.cancel()
         self._running = None
@@ -132,7 +139,7 @@ class _BaseConnector:
         self._last_message_id = 0
         self._message_devices: Dict[int, 'Device'] = dict()
         self._devices: Set['Device'] = set()
-        self._listener = None
+        self._listener: Optional[Listener] = None
         self._application_id = application_id
 
         if device is not None:
@@ -551,6 +558,27 @@ class CloudConnector(_BaseConnector):
                     state = DeviceResponseState.FAILURE
 
         return message_id, state, action, data, device
+
+    def update_token(self, token: str):
+        self.__token = token
+
+    async def update_token_gracefully(self, token: str):
+        if self._listener:
+            listener_before = self._listener.is_running()
+            if listener_before:
+                self._listener.stop()
+        
+        connected_before = self.is_connected
+        if connected_before:
+            await self.close_connection()
+        
+        self.update_token(token)
+
+        if connected_before:
+            await self.open_connection()
+        
+        if self._listener and listener_before:
+            self._listener.start()
 
 
 class Device:
