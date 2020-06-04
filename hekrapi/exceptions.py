@@ -83,11 +83,6 @@ class AuthenticationFailedException(HekrAPIFormattedException):
     default_message = "Authentication failed: {reason}"
 
 
-class AccountUnauthenticatedException(HekrAPIFormattedException):
-    """Raised when account is not authenticated during method call that requires authentication"""
-    default_message = 'Account unauthenticated'
-
-
 class DeviceProtocolNotSetException(HekrAPIFormattedException):
     """Raised when device does not have a protocol set after creation"""
     default_message = "Device does not have a protocol set"
@@ -103,12 +98,29 @@ class AccountDevicesUpdateFailedException(HekrAPIFormattedException):
     default_message = 'Devices update on account failed, reason: {reason}'
 
 
+class UnauthenticatedRequestException(AuthenticationFailedException):
+    default_message = 'Request authentication failed'
+
+
+class AccountUnauthenticatedException(AuthenticationFailedException):
+    """Raised when account is not authenticated during method call that requires authentication"""
+    default_message = 'Account unauthenticated'
+
+
+class AccessTokenExpiredException(AccountUnauthenticatedException):
+    default_message = 'Refresh token expired (valid for 24 hours)'
+
+
+class RefreshTokenExpiredException(AccountUnauthenticatedException):
+    default_message = 'Access token expired (valid for 30 days)'
+
+
 class HekrAPIExpectedGotException(HekrAPIException):
     """Base exception for variable-expected-got exceptions"""
     default_message = "For variable {variable} expected {expected}, got {got}"
 
     def __init__(self, variable, got, expected):
-        if not isinstance(expected, list):
+        if not isinstance(expected, (list, tuple)):
             expected = [expected]
 
         expected = ', '.join([
@@ -117,7 +129,7 @@ class HekrAPIExpectedGotException(HekrAPIException):
             for v in expected
         ])
 
-        if not isinstance(got, list):
+        if not isinstance(got, (list, tuple)):
             got = [got]
 
         got = ', '.join([('`' + v.__name__ + '`' if isinstance(v, type) else str(v)) for v in got])
@@ -134,3 +146,7 @@ class HekrTypeError(HekrAPIExpectedGotException):
 
 class HekrValueError(HekrAPIExpectedGotException):
     default_message = 'Value(s) for {variable} is invalid (expected {expected}; got {got})'
+
+
+class HekrResponseStatusError(HekrAPIExpectedGotException):
+    default_message = 'Response status code for request to {variable} is invalid (expected {expected}; got {got})'

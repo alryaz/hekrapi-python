@@ -1,6 +1,14 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=too-many-arguments
 """Protocol class module for Hekr API"""
+__all__ = [
+    'Protocol',
+    'TO_FLOAT',
+    'TO_BOOL',
+    'TO_STR',
+    'TO_SIGNED_FLOAT',
+    'signed_float_converter'
+]
 from json import dumps as json_dumps
 
 from typing import Union, List, Dict
@@ -12,6 +20,24 @@ from .exceptions import CommandNotFoundException, HekrTypeError, HekrValueError,
     InvalidMessageLengthException, InvalidMessageChecksumException, InvalidMessageFrameTypeException
 from .types import CommandData, AnyCommand, DecodeResult
 
+def signed_float_converter(threshold, type_input=int, type_output=float):
+    """ Generates a signed float converter. """
+    def convert_input(value):
+        """ Adds negative value to threshold to restore original """
+        value = type_input(value)
+        return threshold-value if value < 0 else value
+
+    def convert_output(value):
+        """ Inverts sign if original is equal to or greater than threshold """
+        value = type_output(value)
+        return value if value < threshold else threshold-value
+
+    return (convert_input, convert_output)
+
+TO_FLOAT = (int, float)
+TO_BOOL = (int, bool)
+TO_STR = (int, str)
+TO_SIGNED_FLOAT = signed_float_converter(1000000)
 
 def remove_none(obj):
     """

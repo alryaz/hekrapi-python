@@ -110,7 +110,9 @@ class Listener:
             else:
                 self._running = None
 
-    def start(self, create_task_func: Callable = asyncio.create_task):
+    def start(self, create_task_func: Optional[Callable] = None):
+        if create_task_func is None:
+            create_task_func = asyncio.create_task
         if self.is_running:
             raise HekrAPIException('Cannot start an already running listener, stop it first')
         _LOGGER.debug('Starting listener %s with factory: %s' % (self, create_task_func))
