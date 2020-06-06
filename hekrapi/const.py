@@ -29,6 +29,10 @@ class DeviceConnectionType(Enum):
 
 #: Default application ID used within requests via cloud and local transports
 DEFAULT_APPLICATION_ID = 'hekr_python_connector'
+DEFAULT_APPLICATION_NAME = 'hekr_python_connector'
+DEFAULT_APPLICATION_VERSION = '1.0.0.0'
+DEFAULT_APPLICATION_TYPE = 'hekr'
+DEFAULT_OS_VERSION = 9
 
 #: First character of every presumably valid raw datagram
 FRAME_START_IDENTIFICATION = 0x48

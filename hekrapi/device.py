@@ -22,9 +22,9 @@ from .types import MessageID, Action, ProcessedResponse, HekrCallback, DeviceRes
     AnyCommand, CommandData, DeviceID, DevicesDict
 
 if TYPE_CHECKING:
-    from .protocol import Protocol
     from aiohttp.client import _WSRequestContextManager
     from .aioudp import RemoteEndpoint
+    from .protocol import Protocol
     from .account import Account
 
 _LOGGER = logging.getLogger(__name__)
@@ -101,8 +101,6 @@ class Listener:
             _LOGGER.debug('Closing listener by cancel')
         except IOError:
             _LOGGER.error('Connector appears to be closed')
-        except BaseException:
-            _LOGGER.exception('Listener encountered an exception')
         finally:
             if self._auto_reconnect and not self._stopped:
                 # wait two seconds by default
@@ -258,7 +256,7 @@ class _BaseConnector:
         data = loads(response_str)
         action = data.get('action')
         message_id = data.get('msgId')
-        response_code = data.get('code', 200)  # @TODO: this is a compatibility-oriented default value
+        response_code = data.get('code', 200)
 
         hekr_device = None
         if message_id in self._message_devices:
@@ -287,7 +285,6 @@ class _BaseConnector:
 
             if response_code == 200:
                 data = hekr_device.protocol.decode(raw=data['params']['data']['raw'])
-                command = data[1]
                 _LOGGER.debug('Command executed successfully on device %s'
                               if action == ACTION_COMMAND_RESPONSE else
                               'Received command request for device %s', self)
@@ -563,8 +560,9 @@ class CloudConnector(_BaseConnector):
         self.__token = token
 
     async def update_token_gracefully(self, token: str):
+        listener_before = None
         if self._listener:
-            listener_before = self._listener.is_running()
+            listener_before = self._listener.is_running
             if listener_before:
                 self._listener.stop()
         
@@ -591,6 +589,8 @@ class Device:
         self.control_key = control_key
         self._device_info = device_info
         self.heartbeat_interval = 30
+
+        self._account = None
 
         self._connector: Optional[_BaseConnector] = None
         self._callbacks: Set[HekrCallback] = set()
@@ -632,6 +632,17 @@ class Device:
         :return: Hash of the device ID
         """
         return hash(self.device_id)
+
+    @property
+    def account(self):
+        return self._account
+
+    @account.setter
+    def account(self, account: 'Account'):
+        if self.device_id in account.devices and account.devices[self.device_id] != account:
+            raise HekrAPIException('Another device object %s is already bound to account %s' % (self, account))
+
+        account.devices[self.device_id] = self
 
     @property
     def callbacks(self):
@@ -843,3 +854,7 @@ class Device:
     @property
     def device_name(self):
         return self._device_info_for_property['deviceName']
+
+    @property
+    def name(self):
+        return self._device_info_for_property['name']

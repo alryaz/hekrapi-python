@@ -5,8 +5,8 @@ from typing import List
 
 from .argument import Argument
 from .const import FrameType
-from .exceptions import HekrTypeError, HekrValueError, InvalidDataMissingKeyException, InvalidDataGreaterThanException, \
-    InvalidDataLessThanException
+from .exceptions import HekrTypeError, HekrValueError, InvalidDataMissingKeyException, \
+    InvalidDataGreaterThanException, InvalidDataLessThanException
 from .types import CommandData
 
 
@@ -276,12 +276,10 @@ class Command:
                     value_max=argument.value_max)
 
             if filter_values:
-                print('filtering value for', argument.name, value_input)
                 if argument.multiplier:
                     value_input /= argument.multiplier
 
                 value_input = argument.type_input(value_input)
-                print('new value', argument.name, value_input)
 
             # @TODO: make better performing solution
             result += value_input.to_bytes(

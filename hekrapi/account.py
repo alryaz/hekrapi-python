@@ -6,12 +6,14 @@ __all__ = [
 import logging
 import asyncio
 from json import JSONDecodeError, loads
-from typing import Dict, Optional, Tuple, NoReturn
+from typing import Dict, Optional, Tuple, NoReturn, List
 from datetime import datetime, timedelta
 
 from aiohttp import ClientSession
+from hekrapi import Protocol
 
-from .const import DEFAULT_APPLICATION_ID
+from .const import DEFAULT_APPLICATION_ID, DEFAULT_APPLICATION_NAME, DEFAULT_APPLICATION_VERSION, \
+    DEFAULT_APPLICATION_TYPE, DEFAULT_OS_VERSION
 from .device import Device, CloudConnector
 from .exceptions import AccountUnauthenticatedException, AccountDevicesUpdateFailedException, \
     HekrAPIException, HekrValueError, AuthenticationFailedException, HekrTypeError, HekrResponseStatusError, \
@@ -41,12 +43,19 @@ class Account:
 
     def __init__(self, username: Optional[str] = None, password: Optional[str] = None,
                  access_token: Optional[str] = None, refresh_token: Optional[str] = None,
-                 application_id: str = DEFAULT_APPLICATION_ID, reauth_on_fail: bool = True):
-        # @TODO: refactor after enabling authentication support
+                 application_id: str = DEFAULT_APPLICATION_ID, application_name: str = DEFAULT_APPLICATION_NAME,
+                 application_version: str = DEFAULT_APPLICATION_VERSION,
+                 application_type: str = DEFAULT_APPLICATION_TYPE, os_version: str = DEFAULT_OS_VERSION,
+                 reauthenticate_on_fail: bool = True):
+
         if not access_token and not (username and password):
             raise HekrAPIException("At least one authentication method (token, username/password) must be set up")
 
         self.application_id = application_id
+        self.application_name = application_name
+        self.application_version = application_version
+        self.application_type = application_type
+        self.os_version = os_version
 
         self.__username = username
         self.__password = password
@@ -57,9 +66,9 @@ class Account:
         self._refresh_token_expires_at = None
         self._user_id = None
 
-        self.reauth_on_fail = reauth_on_fail
+        self.reauthenticate_on_fail = reauthenticate_on_fail
 
-        self.__connectors: Dict[str, CloudConnector] = {}
+        self.__connectors: Dict[Tuple[str, int], CloudConnector] = {}
 
         self.__devices: Dict[str, Device] = {}
 
@@ -79,50 +88,103 @@ class Account:
             return connector
         return self.__connectors[key]
 
+    @staticmethod
+    def current_time() -> datetime:
+        """
+        Returns current time.
+        Useful to override when offsets are non-UTC.
+        :return:
+        """
+        return datetime.utcnow()
+
     @property
-    def access_token_expires_at(self):
+    def access_token_expires_at(self) -> Optional[datetime]:
+        """
+        Time and date when the set access token expires.
+        By default expiry is scheduled 24 hours since update.
+        :return:
+        """
         return self._access_token_expires_at
 
     @property
-    def refresh_token_expires_at(self):
+    def refresh_token_expires_at(self) -> Optional[datetime]:
+        """
+        Time and date when the set refresh token expires.
+        By default expiry is scheduled 30 days since update.
+        :return:
+        """
         return self._refresh_token_expires_at
 
     @property
     def access_token_remaining_time(self) -> timedelta:
+        """
+        Calculate remaining time until access token expires.
+        :return: Zero seconds delta (threshold has passed)
+        """
         if self._access_token_expires_at is None:
-            return timedelta(seconds=-1)
-        return self.access_token_expires_at - datetime.now()
+            raise HekrAPIException('Cannot calculate remaining time for access token that is set manually.')
+
+        zero_time = timedelta(seconds=0)
+        remaining_time = self.access_token_expires_at - self.current_time()
+        return remaining_time if remaining_time > zero_time else zero_time
+
+    @property
+    def refresh_token_remaining_time(self) -> timedelta:
+        """
+        Calculate remaining time until refresh token expires.
+        Will return time delta of zero seconds if the threshold has passed.
+        :return:
+        """
+        if self._access_token_expires_at is None:
+            raise HekrAPIException('Cannot calculate remaining time for refresh token that is set manually.')
+
+        zero_time = timedelta(seconds=0)
+        remaining_time = self.access_token_expires_at - self.current_time()
+        return remaining_time if remaining_time > zero_time else zero_time
 
     @property
     def connectors(self) -> Dict[Tuple[str, int], CloudConnector]:
+        """
+        Connectors accessor.
+        :return: (Host, Port) -> Cloud connector
+        """
         return self.__connectors
 
     @property
     def devices(self) -> Dict[str, Device]:
-        """Device dictionary accessor
-
-        Returns:
-            Dict[str, Device] -- dictionary of devices (device_id => Device object)
+        """
+        Devices accessor.
+        :return: Device ID -> Device object
         """
         return self.__devices
 
     def _generate_auth_header(self):
+        """
+        Generate authentication header for HTTP requests.
+        :raises AccountUnauthenticatedException: When access token is not set
+        :raises AccessTokenExpiredException: When access token is considered expired
+        :return:
+        """
         if not self.__access_token:
             raise AccountUnauthenticatedException(account=self)
-        elif self._access_token_expires_at < datetime.now():
+        elif not self.access_token_remaining_time:
             raise AccessTokenExpiredException(account=self)
 
         return {'Authorization': 'Bearer ' + self.__access_token}
 
     @classmethod
-    async def _do_request(cls, url: str, headers: Optional[Dict[str,str]] = None,
-                          account: Optional['Account'] = None, authenticated: bool = False,
-                          **request_args):
+    async def _do_request(cls, url: str, headers: Optional[Dict[str, str]] = None,
+                          account: Optional['Account'] = None, **request_args):
+        """
+        Perform request to HTTP API.
+        :param url: URL to request
+        :param headers: Headers to pass (will be merged with auth headers if `authenticated=True`)
+        :param account: Account to use for authentication
+        :param request_args: Additional arguments to pass to requester
+        :return:
+        """
         if headers is None:
-            if authenticated:
-                if account is None:
-                    raise HekrValueError('account', expected='account (authenticated=true)', got=account)
-                headers = account._generate_auth_header()
+            headers = None if account is None else account._generate_auth_header()
         else:
             raise HekrValueError('headers', expected=('headers dict', None), got=headers)
 
@@ -133,7 +195,7 @@ class Account:
                 _LOGGER.debug('Received response (%d): %s' % (response.status, content))
 
                 if response.status == 403:
-                    raise AuthenticationFailedException(account=account)
+                    raise AccountUnauthenticatedException(account=account)
                 elif response.status != 200:
                     raise HekrResponseStatusError(url, got=response.status, expected=200)
 
@@ -141,34 +203,25 @@ class Account:
                     return loads(content)
                 return content
 
-    async def _do_account_request(self, url: str, headers: Optional[Dict[str,str]] = None,
-                                  authenticated: bool = True, **request_args):
-        """ Shortcut method to do account-bound requests. """
-        try:
-            return await self._do_request(url, headers=headers, account=self,
-                                        authenticated=authenticated, **request_args)
-        except AuthenticationFailedException as e:
-            raise AccountUnauthenticatedException(account=self, *e.arguments)
-
     @classmethod
     async def refresh_authentication_token(cls, refresh_token: str, expires_in: int = 86400):
         payload = {
             'refresh_token': refresh_token,
             'expires_in': expires_in,
         }
-        return await cls._do_request(cls.BASE_AUTH_URL + '/token/refresh', json=payload, authenticated=False)
+        return await cls._do_request(cls.BASE_AUTH_URL + '/token/refresh', json=payload)
 
     def _process_auth_response(self, response: Dict) -> NoReturn:
         if not response:
             raise HekrValueError('response', expected='filled response dictionary', got=response)
 
         if self.__refresh_token != response['refresh_token']:
-            self._refresh_token_expires_at = datetime.now() + timedelta(days=30)
+            self._refresh_token_expires_at = self.current_time() + timedelta(days=30)
 
         self.__refresh_token = response['refresh_token']
         self.__access_token = response['access_token']
         self._user_id = response['user']
-        self._access_token_expires_at = datetime.now() + timedelta(seconds=response['expires_in'])
+        self._access_token_expires_at = self.current_time() + timedelta(seconds=response['expires_in'])
 
     async def refresh_authentication(self, expires_in: int = 86400) -> NoReturn:
         """ Refresh authentication manually. """
@@ -185,7 +238,6 @@ class Account:
         await self.update_connectors()
 
     async def authenticate(self, pid: str = '00000000000', client_type: str = 'ANDROID',
-                           app_version: str = '1.0.0:0', app_name: str = "hekrapi",
                            attempt_refresh: bool = True) -> NoReturn:
         """Authenticate account with Hekr"""
         if attempt_refresh and self.__refresh_token:
@@ -203,23 +255,19 @@ class Account:
             'clientType': client_type,
             'appLoginInfo': {
                 "id": self.application_id,
-                "os": 9,
-                "type": "hekrapi",
-                "appVersion": app_version,
-                "name": "hekrapi",
+                "os": self.os_version,
+                "type": self.application_type,
+                "appVersion": self.application_version,
+                "name": self.application_name,
             }
         }
         try:
-            response = await self._do_request(
-                url=self.BASE_AUTH_URL + '/login',
-                authenticated=False,
-                json=payload
-            )
+            response = await self._do_request(self.BASE_AUTH_URL + '/login', json=payload)
             _LOGGER.info('Successful login for account %s' % self)
             self._process_auth_response(response)
 
             await self.update_connectors()
-        except:
+        except HekrAPIException:
             raise AuthenticationFailedException(account=self)
 
     async def get_devices(self) -> Dict[str, dict]:
@@ -277,26 +325,45 @@ class Account:
             for connector in self.__connectors.values():
                 connector.update_token(self.__access_token)
 
-    async def update_devices(self, devices_info: Optional[Dict[str, dict]] = None) -> Dict[str, Device]:
+    async def update_devices(self, devices_info: Optional[Dict[str, dict]] = None,
+                             protocols: Optional[List['Protocol']] = None,
+                             update_existing_device_protocols: bool = False) -> Dict[str, Device]:
         """
         Get devices, and update attributes if an object already exists, or create new ones based on retrieved info.
+        :param devices_info: Information about devices (via `get_devices`)
+        :param protocols: Use specified protocols for detection
+        :param update_existing_device_protocols: Update protocols for existing devices
         :return: Dictionary with new devices indexed by device ID
         """
-
         if devices_info is None:
             devices_info = await self.get_devices()
 
+        use_protocol_detection = bool(protocols)
+
         devices = {}
-        for device_id, device_attributes in devices_info:
+        for device_id, device_attributes in devices_info.items():
+            detect_protocols = use_protocol_detection
             if device_id in self.__devices:
-                self.__devices[device_id].device_info = device_attributes
+                device = self.__devices[device_id]
+                if update_existing_device_protocols:
+                    detect_protocols = False
             else:
                 device = Device(device_id=device_id, control_key=device_attributes['ctrlKey'])
                 device.connector = self.get_connector(connect_host=device_attributes['dcInfo']['connectHost'])
+                device.account = self
 
-                devices[device_id] = device
+            device.device_info = device_attributes
+
+            if detect_protocols:
+                for protocol in protocols:
+                    if protocol.compatibility_checker(device):
+                        device.protocol = protocol
+                        break
+                # @TODO: probably raise exception for missing detections
 
         if devices:
-            self.__devices.update(devices)
+            _LOGGER.debug('Devices found for account %s, total device count: %d' % (self, len(self.devices)))
+        else:
+            _LOGGER.debug('No devices found for account %s' % self)
 
         return devices

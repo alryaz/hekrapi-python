@@ -11,14 +11,17 @@ __all__ = [
 ]
 from json import dumps as json_dumps
 
-from typing import Union, List, Dict
-from yaml import dump as yaml_dump, SafeDumper
+from typing import TYPE_CHECKING, Union, List, Dict, Optional, Callable
 
 from .command import Command
 from .const import FRAME_START_IDENTIFICATION
 from .exceptions import CommandNotFoundException, HekrTypeError, HekrValueError, InvalidMessagePrefixException, \
     InvalidMessageLengthException, InvalidMessageChecksumException, InvalidMessageFrameTypeException
 from .types import CommandData, AnyCommand, DecodeResult
+
+if TYPE_CHECKING:
+    from .device import Device
+
 
 def signed_float_converter(threshold, type_input=int, type_output=float):
     """ Generates a signed float converter. """
@@ -32,12 +35,14 @@ def signed_float_converter(threshold, type_input=int, type_output=float):
         value = type_output(value)
         return value if value < threshold else threshold-value
 
-    return (convert_input, convert_output)
+    return convert_input, convert_output
+
 
 TO_FLOAT = (int, float)
 TO_BOOL = (int, bool)
 TO_STR = (int, str)
 TO_SIGNED_FLOAT = signed_float_converter(1000000)
+
 
 def remove_none(obj):
     """
@@ -60,13 +65,15 @@ def remove_none(obj):
 class Protocol:
     """ Protocol definition class """
 
-    def __init__(self, *args):
+    def __init__(self, *args, compatibility_checker: Optional[Callable[['Device'], bool]] = None):
         """
         Protocol definition constructor.
 
         :param args: Variable-length of arguments, `Command` objects.
         """
         self.commands = list(args)
+
+        self.compatibility_checker = compatibility_checker
 
     @property
     def commands(self) -> List[Command]:
@@ -93,8 +100,10 @@ class Protocol:
         if not isinstance(value, list):
             raise HekrTypeError(variable='commands', expected=list, got=type(value))
 
-        invalid_types = [type(x) for x in value
-            if not isinstance(x, Command)]
+        invalid_types = [
+            type(x) for x in value
+            if not isinstance(x, Command)
+        ]
         if invalid_types:
             raise HekrTypeError(variable='commands', expected=Command, got=invalid_types)
 
@@ -199,6 +208,16 @@ class Protocol:
 
         return raw.hex().upper()
 
+    def is_device_compatible(self, device: 'Device') -> bool:
+        """
+        Detects whether passed device is compatible with given protocol.
+        :param device:
+        :return:
+        """
+        if self.compatibility_checker:
+            return self.compatibility_checker(device)
+        raise NotImplementedError
+
     def get_command_by_id(self, command_id: int) -> Command:
         """
         Get command definition object by its ID.
@@ -287,7 +306,12 @@ class Protocol:
         }
         return remove_none(definition) if filter_empty else definition
 
-    def get_definition_serialized(self, output_format: str = 'yaml') -> str:
+    default_serialization_format = 'json'
+    serialization_formats = {
+        'json': lambda definition: json_dumps(definition, ensure_ascii=False),
+    }
+
+    def get_definition_serialized(self, output_format: Optional[str] = None) -> str:
         """
         Returns protocol definition as serialized dictionary.
 
@@ -296,17 +320,16 @@ class Protocol:
         :return: Serialized definition dictionary
         :rtype: str
         """
+        if output_format is None:
+            output_format = self.default_serialization_format
+        elif output_format not in self.serialization_formats:
+            raise HekrValueError(variable='output_format', expected=['json'], got=output_format)
+
         definition = self.get_definition_dict()
-        if output_format == 'yaml':
-            output = yaml_dump(definition, Dumper=SafeDumper, default_flow_style=False, sort_keys=False)
-        elif output_format == 'json':
-            output = json_dumps(definition, ensure_ascii=False)
-        else:
-            raise HekrValueError(variable='output_format', expected=['yaml', 'json'], got=output_format)
 
-        return output
+        return self.serialization_formats[output_format](definition)
 
-    def print_definition(self, output_format: str = 'yaml') -> None:
+    def print_definition(self, output_format: Optional[str] = None) -> None:
         """
         Prints protocol definition.
 

@@ -4,7 +4,7 @@ from enum import IntEnum
 
 from ..argument import Argument
 from ..command import Command, FrameType
-from ..protocol import Protocol, TO_STR, TO_INT, TO_FLOAT, TO_BOOL, TO_SIGNED_FLOAT
+from ..protocol import Protocol, TO_STR, TO_FLOAT, TO_BOOL, TO_SIGNED_FLOAT
 
 __all__ = [
     "VoltageWarning",
@@ -39,6 +39,7 @@ class SwitchState(IntEnum):
     ON = 0
     OFF = 1
     FAILURE = 2
+
 
 PROTOCOL = Protocol(
     Command(0, FrameType.SEND, "queryDev", response_command_id=1),
@@ -122,5 +123,6 @@ PROTOCOL = Protocol(
         Argument("option_electricity_purchase", TO_FLOAT, 4, "purchaseElectricity", multiplier=0.01, value_min=0, value_max=999999.99),
         Argument("option_electricity_alarm", TO_FLOAT, 4, "electricityAlarm_set", multiplier=0.01, value_min=0, value_max=999999.99),
         Argument("option_prepaid_enabled", TO_BOOL, 1, "prepaidFunctionSw")
-    ])
+    ]),
+    compatibility_checker=lambda d: d.product_name == 'Smart Meter'
 )

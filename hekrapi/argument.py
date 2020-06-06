@@ -6,6 +6,8 @@ from typing import Callable, Any, Union, Tuple, Optional
 from enum import IntEnum
 
 ArgumentType = Callable[[Any], Any]
+
+
 class Argument:
     """Argument class for HekrAPI"""
 
