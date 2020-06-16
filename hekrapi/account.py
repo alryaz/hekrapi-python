@@ -6,14 +6,14 @@ __all__ = [
 import logging
 import asyncio
 from json import JSONDecodeError, loads
-from typing import Dict, Optional, Tuple, NoReturn, List
+from typing import Dict, Optional, Tuple, NoReturn, List, Iterable
 from datetime import datetime, timedelta
 
 from aiohttp import ClientSession
 from hekrapi import Protocol
 
 from .const import DEFAULT_APPLICATION_ID, DEFAULT_APPLICATION_NAME, DEFAULT_APPLICATION_VERSION, \
-    DEFAULT_APPLICATION_TYPE, DEFAULT_OS_VERSION
+    DEFAULT_APPLICATION_TYPE, DEFAULT_OS_VERSION, DEFAULT_TIMEOUT
 from .device import Device, CloudConnector
 from .exceptions import AccountUnauthenticatedException, AccountDevicesUpdateFailedException, \
     HekrAPIException, HekrValueError, AuthenticationFailedException, HekrTypeError, HekrResponseStatusError, \
@@ -326,13 +326,16 @@ class Account:
                 connector.update_token(self.__access_token)
 
     async def update_devices(self, devices_info: Optional[Dict[str, dict]] = None,
-                             protocols: Optional[List['Protocol']] = None,
-                             update_existing_device_protocols: bool = False) -> Dict[str, Device]:
+                             protocols: Optional[Iterable['Protocol']] = None,
+                             update_existing_device_protocols: bool = False,
+                             with_timeout: float = DEFAULT_TIMEOUT) -> Dict[str, Device]:
         """
         Get devices, and update attributes if an object already exists, or create new ones based on retrieved info.
         :param devices_info: Information about devices (via `get_devices`)
         :param protocols: Use specified protocols for detection
         :param update_existing_device_protocols: Update protocols for existing devices
+        :param with_timeout: (Optional) Pre-apply timeout on all new and bound devices; will overwrite timeout for
+                             devices using same connector to communicate with cloud on every run
         :return: Dictionary with new devices indexed by device ID
         """
         if devices_info is None:
@@ -353,6 +356,7 @@ class Account:
                 device.account = self
 
             device.device_info = device_attributes
+            device.connector.timeout = with_timeout
 
             if detect_protocols:
                 for protocol in protocols:

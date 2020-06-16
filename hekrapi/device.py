@@ -15,7 +15,7 @@ from .const import (
     DeviceResponseState,
     ACTION_DEVICE_AUTH_RESPONSE, ACTION_CLOUD_AUTH_RESPONSE, ACTION_DEVICE_MESSAGE, ACTION_COMMAND_RESPONSE,
     ACTION_HEARTBEAT_RESPONSE, ACTION_HEARTBEAT_REQUEST, ACTION_DEVICE_AUTH_REQUEST, ACTION_COMMAND_REQUEST,
-    ACTION_CLOUD_AUTH_REQUEST, DEFAULT_WEBSOCKET_HOST, DEFAULT_WEBSOCKET_PORT)
+    ACTION_CLOUD_AUTH_REQUEST, DEFAULT_WEBSOCKET_HOST, DEFAULT_WEBSOCKET_PORT, DEFAULT_TIMEOUT)
 from .exceptions import *
 from .helpers import sensitive_info_filter
 from .types import MessageID, Action, ProcessedResponse, HekrCallback, DeviceResponse, DeviceInfo, \
@@ -133,12 +133,15 @@ class Listener:
 class _BaseConnector:
     """Base endpoint class for implementing other endpoints"""
 
-    def __init__(self, device: Optional['Device'] = None, application_id: str = DEFAULT_APPLICATION_ID):
+    def __init__(self, device: Optional['Device'] = None, application_id: str = DEFAULT_APPLICATION_ID,
+                 timeout: float = DEFAULT_TIMEOUT):
         self._last_message_id = 0
         self._message_devices: Dict[int, 'Device'] = dict()
         self._devices: Set['Device'] = set()
         self._listener: Optional[Listener] = None
         self._application_id = application_id
+
+        self.timeout = timeout
 
         if device is not None:
             self.attach_device(device)
@@ -329,6 +332,15 @@ class _BaseConnector:
         raise NotImplementedError
 
     async def open_connection(self) -> None:
+        """Wrapper for connection opener to handle timeout."""
+        try:
+            await asyncio.wait_for(self.open_connection(), timeout=self.timeout)
+
+        except asyncio.TimeoutError:
+            raise ConnectionTimeoutException('Connector on %s timed out (waited for %d seconds to establish '
+                                             'connection with the host)' % self.timeout) from None
+
+    async def _open_connection(self) -> None:
         """Open connection with connector."""
         raise NotImplementedError
 
@@ -356,15 +368,15 @@ class LocalConnector(_BaseConnector):
     connection_type = DeviceConnectionType.LOCAL
     connection_priority = 1000
 
-    def __init__(self, host: str, port: int, hekr_device: Optional['Device'] = None,
+    def __init__(self, host: str, port: int, device: Optional['Device'] = None,
                  application_id: str = DEFAULT_APPLICATION_ID) -> None:
-        super().__init__(hekr_device, application_id)
+        super().__init__(device, application_id)
         self._endpoint: Optional['RemoteEndpoint'] = None
         self._host = host
         self._port = port
 
     def __str__(self):
-        return '<HekrApi:LocalConnector(' + self._host + ':' + str(self._port) + ')>'
+        return '<HekrApi:' + self.__class__.__name__ + '(' + self._host + ':' + str(self._port) + ')>'
 
     def attach_device(self, hekr_device: 'Device'):
         if self._devices:
@@ -376,7 +388,7 @@ class LocalConnector(_BaseConnector):
         hekr_device = next(iter(self._devices))
         return super()._get_request_base(action, hekr_device, message_id)
 
-    async def open_connection(self) -> None:
+    async def _open_connection(self) -> None:
         if self.is_connected:
             raise HekrAPIException('Local endpoint already established')
         if not self._devices:
@@ -451,13 +463,13 @@ class CloudConnector(_BaseConnector):
         self._connect_port = connect_port
 
     def __str__(self) -> str:
-        return '<Hekr:CloudConnector(' + self._connect_host + ':' + str(self._connect_port) + ')>'
+        return '<Hekr:' + self.__class__.__name__ + '(' + self._connect_host + ':' + str(self._connect_port) + ')>'
 
     @property
     def is_connected(self) -> bool:
         return self._endpoint is not None and self._session is not None
 
-    async def open_connection(self) -> None:
+    async def _open_connection(self) -> None:
         _LOGGER.debug('Opening cloud endpoint to device %s' % self._connect_host)
         session = ClientSession()
         try:

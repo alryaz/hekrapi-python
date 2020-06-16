@@ -6,6 +6,10 @@ class HekrAPIException(BaseException):
     pass
 
 
+class ConnectionTimeoutException(HekrAPIException):
+    pass
+
+
 class HekrAPIFormattedException(HekrAPIException):
     """Base exception class for all HekrAPI exceptions"""
     default_message = 'HekrAPI Exception occurred'
