@@ -334,11 +334,11 @@ class _BaseConnector:
     async def open_connection(self) -> None:
         """Wrapper for connection opener to handle timeout."""
         try:
-            await asyncio.wait_for(self.open_connection(), timeout=self.timeout)
+            await asyncio.wait_for(self._open_connection(), timeout=self.timeout)
 
         except asyncio.TimeoutError:
             raise ConnectionTimeoutException('Connector on %s timed out (waited for %d seconds to establish '
-                                             'connection with the host)' % self.timeout) from None
+                                             'connection with the host)' % (self, self.timeout)) from None
 
     async def _open_connection(self) -> None:
         """Open connection with connector."""
@@ -369,8 +369,8 @@ class LocalConnector(_BaseConnector):
     connection_priority = 1000
 
     def __init__(self, host: str, port: int, device: Optional['Device'] = None,
-                 application_id: str = DEFAULT_APPLICATION_ID) -> None:
-        super().__init__(device, application_id)
+                 application_id: str = DEFAULT_APPLICATION_ID, timeout: float = DEFAULT_TIMEOUT) -> None:
+        super().__init__(device, application_id, timeout=timeout)
         self._endpoint: Optional['RemoteEndpoint'] = None
         self._host = host
         self._port = port
@@ -454,8 +454,9 @@ class CloudConnector(_BaseConnector):
     connection_priority = 2000
 
     def __init__(self, token: str, device: Optional['Device'] = None, application_id: str = DEFAULT_APPLICATION_ID,
-                 connect_host: str = DEFAULT_WEBSOCKET_HOST, connect_port: int = DEFAULT_WEBSOCKET_PORT) -> None:
-        super().__init__(device, application_id)
+                 connect_host: str = DEFAULT_WEBSOCKET_HOST, connect_port: int = DEFAULT_WEBSOCKET_PORT,
+                 timeout: float = DEFAULT_TIMEOUT) -> None:
+        super().__init__(device, application_id, timeout=timeout)
         self.__token = token
         self._session: Optional[ClientSession] = None
         self._endpoint: Optional['_WSRequestContextManager'] = None
