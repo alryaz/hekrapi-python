@@ -1,10 +1,18 @@
 """Types for Hekr API project."""
 
-from typing import Tuple, Dict, Any, Union, Optional, Callable
+from typing import Tuple, Dict, Any, Union, Optional, Callable, TypeVar
 
 from .const import DeviceResponseState
 
-DecodeResult = Tuple['Command', Dict[str, Any], int]
+# Raw datagram type
+RawDataType = Union[str, bytes, bytearray]
+JSONDataType = Dict[str, Optional[Union[str, int]]]
+
+# Encoding / decoding types
+CommandData = Dict[str, Any]
+MessageData = Dict[str, Union[str, int, float]]
+
+DecodeResult = Tuple['Command', CommandData, int]
 MessageID = int
 DeviceID = str
 Action = str
@@ -17,5 +25,6 @@ HekrCallback = Callable[[Optional['Device'], MessageID, DeviceResponseState, Act
 
 DeviceInfo = Dict[str, Any]
 AnyCommand = Union[int, str, 'Command']
-CommandData = Optional[Dict[str, Any]]
+MessageEncoded = TypeVar('MessageEncoded')
+CommandEncoded = TypeVar('CommandEncoded')
 DevicesDict = Dict[DeviceID, 'Device']

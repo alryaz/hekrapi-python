@@ -1,12 +1,14 @@
 """ Helpers for Hekr API """
-from re import sub
+import re
 from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     pass
 
+SENSITIVE_INFO_MATCH = re.compile(r'(["\'](ctrlKey|token)"\s*:\s*")[^"]+(["\'])')
 
-def sensitive_info_filter(content: str) -> str:
+
+def sensitive_info_filter(content: Union[str, bytes]) -> str:
     """
     Filters sensitive information from string for logs.
 
@@ -15,9 +17,7 @@ def sensitive_info_filter(content: str) -> str:
     :return: Filtered content.
     :rtype: str
     """
-    return sub(r'("(ctrlKey|token)"\s*:\s*")[^"]+(")',
-               r'\1<redacted>\3',
-               content)
+    return SENSITIVE_INFO_MATCH.sub(r'\1<redacted>\3', str(content))
 
 
 def device_id_from_mac_address(mac_address: Union[str, bytearray]) -> str:

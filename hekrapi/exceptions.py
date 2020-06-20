@@ -152,5 +152,9 @@ class HekrValueError(HekrAPIExpectedGotException):
     default_message = 'Value(s) for {variable} is invalid (expected {expected}; got {got})'
 
 
+class HekrValueSizeError(HekrAPIExpectedGotException):
+    default_message = 'Value for {variable} is of invalid length (expected {expected}; got {got})'
+
+
 class HekrResponseStatusError(HekrAPIExpectedGotException):
     default_message = 'Response status code for request to {variable} is invalid (expected {expected}; got {got})'

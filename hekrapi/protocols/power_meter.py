@@ -2,9 +2,8 @@
 """ Basic protocol definition for a smart power meter """
 from enum import IntEnum
 
-from ..argument import Argument
-from ..command import Command, FrameType
-from ..protocol import Protocol, TO_STR, TO_FLOAT, TO_BOOL, TO_SIGNED_FLOAT
+from ..protocol import Protocol, TO_STR, TO_FLOAT, TO_BOOL, TO_SIGNED_FLOAT, Command, Argument
+from ..const import FrameType
 
 __all__ = [
     "VoltageWarning",
@@ -124,5 +123,6 @@ PROTOCOL = Protocol(
         Argument("option_electricity_alarm", TO_FLOAT, 4, "electricityAlarm_set", multiplier=0.01, value_min=0, value_max=999999.99),
         Argument("option_prepaid_enabled", TO_BOOL, 1, "prepaidFunctionSw")
     ]),
-    compatibility_checker=lambda d: d.product_name == 'Smart Meter'
+    compatibility_checker=lambda d: d.product_name == 'Smart Meter',
+    default_port=10000,
 )

@@ -2,13 +2,13 @@
 """Device class module for Hekr API"""
 import asyncio
 import logging
+from functools import partial
 from json import dumps, loads
 from typing import Optional, Any, TYPE_CHECKING, Dict, Set, Callable, Union
 
 from aiohttp import ClientSession, WSMsgType, client_exceptions
 
 from .aioudp import open_remote_endpoint
-from .command import Command
 from .const import (
     DEFAULT_APPLICATION_ID,
     DeviceConnectionType,
@@ -16,15 +16,16 @@ from .const import (
     ACTION_DEVICE_AUTH_RESPONSE, ACTION_CLOUD_AUTH_RESPONSE, ACTION_DEVICE_MESSAGE, ACTION_COMMAND_RESPONSE,
     ACTION_HEARTBEAT_RESPONSE, ACTION_HEARTBEAT_REQUEST, ACTION_DEVICE_AUTH_REQUEST, ACTION_COMMAND_REQUEST,
     ACTION_CLOUD_AUTH_REQUEST, DEFAULT_WEBSOCKET_HOST, DEFAULT_WEBSOCKET_PORT, DEFAULT_TIMEOUT)
+from .protocol import Encoding, Command
 from .exceptions import *
 from .helpers import sensitive_info_filter
 from .types import MessageID, Action, ProcessedResponse, HekrCallback, DeviceResponse, DeviceInfo, \
     AnyCommand, CommandData, DeviceID, DevicesDict
 
 if TYPE_CHECKING:
+    from .protocol import Protocol
     from aiohttp.client import _WSRequestContextManager
     from .aioudp import RemoteEndpoint
-    from .protocol import Protocol
     from .account import Account
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,6 +52,13 @@ class Listener:
             else callback_exec_function
         self._callback_task_function = asyncio.create_task if callback_task_function is None \
             else callback_task_function
+
+    def __enter__(self):
+        self.start()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.is_running:
+            self.stop()
 
     def __str__(self):
         return '<Hekr:Listener(' + ('running' if self.is_running else 'stopped') + ', ' + str(self.connector) + ')>'
@@ -146,6 +154,14 @@ class _BaseConnector:
         if device is not None:
             self.attach_device(device)
 
+    async def __aenter__(self):
+        await self.open_connection()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.is_connected:
+            await self.close_connection()
+
     @property
     def last_message_id(self) -> int:
         return self._last_message_id
@@ -169,7 +185,7 @@ class _BaseConnector:
         self._devices.remove(hekr_device)
 
     def is_attached(self, hekr_device: 'Device') -> bool:
-        """Checkes whether device is attached."""
+        """Checks whether device is attached."""
         return hekr_device in self._devices
 
     @property
@@ -287,11 +303,12 @@ class _BaseConnector:
                 raise DeviceProtocolNotSetException(device=self)
 
             if response_code == 200:
-                data = hekr_device.protocol.decode(raw=data['params']['data']['raw'])
+                data = hekr_device.protocol.decode(data=data['params']['data'])
                 _LOGGER.debug('Command executed successfully on device %s'
                               if action == ACTION_COMMAND_RESPONSE else
                               'Received command request for device %s', self)
                 state = DeviceResponseState.SUCCESS
+
             else:
                 _LOGGER.debug('Command failed on device %s, raw response: %s', self, data)
                 state = DeviceResponseState.FAILURE
@@ -418,13 +435,13 @@ class LocalConnector(_BaseConnector):
         self._endpoint = None
 
     async def send_request(self, request_str: str) -> None:
-        _LOGGER.debug('Sending request via %s with content: %s' % (self, request_str))
+        _LOGGER.debug('Sending request via %s with content: %s' % (self, sensitive_info_filter(request_str)))
         self._endpoint.send(str.encode(request_str))
 
     async def read_response(self) -> str:
         _LOGGER.debug('Starting receiving on %s' % self)
         response = await self._endpoint.receive()
-        _LOGGER.debug('Received response on %s with content: %s' % (self, response))
+        _LOGGER.debug('Received response on %s with content: %s' % (self, sensitive_info_filter(response)))
         return response.decode('utf-8').strip()
 
     @property
@@ -477,7 +494,7 @@ class CloudConnector(_BaseConnector):
             from random import getrandbits
             from base64 import b64encode
             raw_key = bytes(getrandbits(8) for _ in range(16))
-            websocket_key = b64encode(raw_key).decode()
+            websocket_key = b64encode(raw_key).decode('utf-8')
 
             self._endpoint = await session.ws_connect(
                 'https://' + self._connect_host + ':' + str(self._connect_port) + '/',
@@ -646,6 +663,25 @@ class Device:
         """
         return hash(self.device_id)
 
+    async def _command_get_response(self, command: AnyCommand, *args, **kwargs):
+        message_id = await self.command(command, *args, **kwargs)
+        return await self.get_response(message_id)
+
+    def __getattr__(self, item: str):
+        if self.protocol is not None:
+            command = self.protocol.get_command(item, raise_for_error=False)
+            if command is not None:
+                return partial(self._command_get_response, command)
+
+        raise AttributeError('Object %s does not have attribute "%s"' % (self, item))
+
+    async def __aenter__(self):
+        await self.open_connection()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close_connection()
+
     @property
     def account(self):
         return self._account
@@ -682,6 +718,21 @@ class Device:
         self._connector = connector
         if connector is not None:
             connector.attach_device(self)
+
+    @classmethod
+    def local(cls, *args, host: str, port: Optional[int] = None, raise_for_error: bool = True, **kwargs) \
+            -> Optional['Device']:
+        device = cls(*args, **kwargs)
+        if port is None:
+            if device.protocol is None or device.protocol.default_port is None:
+                if raise_for_error:
+                    raise HekrValueError(variable='port', expected='port number', got=None)
+                return None
+            port = device.protocol.default_port
+
+        device.connector = LocalConnector(host=host, port=port)
+
+        return device
 
     async def open_connection(self) -> _BaseConnector:
         """Open connection with available connector."""
@@ -758,9 +809,11 @@ class Device:
         """
         return await self.make_request(ACTION_HEARTBEAT_REQUEST)
 
-    async def command(self, command: AnyCommand, data: CommandData = None, frame_number: int = None) -> MessageID:
+    async def command(self, command: AnyCommand, data: CommandData = None, frame_number: int = None,
+                      raise_for_error: bool = True) -> Optional[MessageID]:
         """
         Execute device command.
+        :param raise_for_error:
         :param command: Command ID/name/object
         :param data: (optional) Data values for datagram
         :param frame_number: (optional) Frame number
@@ -768,21 +821,40 @@ class Device:
         """
         if not isinstance(command, Command):
             if not self.protocol:
-                raise DeviceProtocolNotSetException(self)
-            command = self.protocol.get_command(command)
+                if raise_for_error:
+                    raise DeviceProtocolNotSetException(self)
+                return None
+
+            command = self.protocol.get_command(command, raise_for_error=raise_for_error)
+            if not command:
+                return None
 
         if frame_number is None:
             frame_number = self.__last_frame_number + 1
 
         self.__last_frame_number = frame_number
 
-        raw = self.protocol.encode(
+        # Preserve encoding type before encode call
+        encoding_type = self.protocol.default_encoding_type
+        encoding_values = list(Encoding)
+
+        if encoding_type not in encoding_values:
+            if raise_for_error:
+                raise HekrValueError(variable='encoding_type', expected='known encoding', got=encoding_type)
+            return None
+
+        encoded_data = self.protocol.encode(
             data=data,
             command=command,
-            frame_number=frame_number
+            frame_number=frame_number,
+            encoding_type=encoding_type,
+            raise_for_error=raise_for_error
         )
 
-        return await self.make_request(ACTION_COMMAND_REQUEST, {"data": {"raw": raw}})
+        if encoded_data is None:
+            return None
+
+        return await self.make_request(ACTION_COMMAND_REQUEST, {"data": encoded_data})
 
     # device info-related accessors
     @property
