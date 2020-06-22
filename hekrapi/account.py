@@ -2,22 +2,32 @@
 """Account class module for HekrAPI"""
 __all__ = [
     'Account',
+    'CloudConnector'
 ]
+
 import logging
-import asyncio
-from json import JSONDecodeError, loads
-from typing import Dict, Optional, Tuple, NoReturn, List, Iterable
 from datetime import datetime, timedelta
+from json import JSONDecodeError, loads
+from typing import Dict, Optional, Tuple, Iterable, TYPE_CHECKING, List, FrozenSet
+
+try:
+    from typing import NoReturn
+except ImportError:
+    NoReturn = None
 
 from aiohttp import ClientSession
-from hekrapi import Protocol
 
 from .const import DEFAULT_APPLICATION_ID, DEFAULT_APPLICATION_NAME, DEFAULT_APPLICATION_VERSION, \
     DEFAULT_APPLICATION_TYPE, DEFAULT_OS_VERSION, DEFAULT_TIMEOUT
 from .device import Device, CloudConnector
 from .exceptions import AccountUnauthenticatedException, AccountDevicesUpdateFailedException, \
-    HekrAPIException, HekrValueError, AuthenticationFailedException, HekrTypeError, HekrResponseStatusError, \
+    HekrAPIException, HekrValueError, AuthenticationFailedException, HekrResponseStatusError, \
     RefreshTokenExpiredException, AccessTokenExpiredException
+from .types import DeviceInfo
+
+if TYPE_CHECKING:
+    from .protocol import Protocol
+    # noinspection PyProtectedMember
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,23 +40,28 @@ class Account:
         AccountUnauthenticatedException: Account did not authenticate prior to calling method
 
     Attributes:
-        __username (str): Account username
-        __password (str, optional): Account password (not required with token)
-        __access_token (str, optional): Authentication 'Bearer' token (not required with password)
-        __refresh_token (str, optional): Refresh token (not required with password)
-        __devices (dict): Dictionary with 'Device' objects belonging to account
+        _username (str): Account username
+        _password (str, optional): Account password (not required with token)
+        _access_token (str, optional): Authentication 'Bearer' token (not required with password)
+        _refresh_token (str, optional): Refresh token (not required with password)
+        _attached_devices (dict): Dictionary with 'Device' objects belonging to account
         application_id (str): Application ID (has default value)
     """
 
     BASE_URL = 'https://user-openapi.hekreu.me'
     BASE_AUTH_URL = 'https://uaa-openapi.hekr.me'
 
-    def __init__(self, username: Optional[str] = None, password: Optional[str] = None,
-                 access_token: Optional[str] = None, refresh_token: Optional[str] = None,
-                 application_id: str = DEFAULT_APPLICATION_ID, application_name: str = DEFAULT_APPLICATION_NAME,
+    def __init__(self, username: Optional[str] = None,
+                 password: Optional[str] = None,
+                 access_token: Optional[str] = None,
+                 refresh_token: Optional[str] = None,
+                 reauthenticate_on_fail: bool = True,
+                 default_timeout: int = DEFAULT_TIMEOUT,
+                 application_id: str = DEFAULT_APPLICATION_ID,
+                 application_name: str = DEFAULT_APPLICATION_NAME,
                  application_version: str = DEFAULT_APPLICATION_VERSION,
-                 application_type: str = DEFAULT_APPLICATION_TYPE, os_version: str = DEFAULT_OS_VERSION,
-                 reauthenticate_on_fail: bool = True):
+                 application_type: str = DEFAULT_APPLICATION_TYPE,
+                 os_version: str = DEFAULT_OS_VERSION):
 
         if not access_token and not (username and password):
             raise HekrAPIException("At least one authentication method (token, username/password) must be set up")
@@ -56,11 +71,12 @@ class Account:
         self.application_version = application_version
         self.application_type = application_type
         self.os_version = os_version
+        self.default_timeout = default_timeout
 
-        self.__username = username
-        self.__password = password
-        self.__access_token = access_token
-        self.__refresh_token = refresh_token
+        self._username = username
+        self._password = password
+        self._access_token = access_token
+        self._refresh_token = refresh_token
 
         self._access_token_expires_at = None
         self._refresh_token_expires_at = None
@@ -68,25 +84,29 @@ class Account:
 
         self.reauthenticate_on_fail = reauthenticate_on_fail
 
-        self.__connectors: Dict[Tuple[str, int], CloudConnector] = {}
+        self._connectors: Dict[Tuple[str, int], CloudConnector] = {}
 
-        self.__devices: Dict[str, Device] = {}
+        self._attached_devices: List['Device'] = []
 
-    def get_connector(self, connect_host: str, connect_port: int = 186):
-        if not self.__access_token:
+    def get_connector(self, connect_host: str, connect_port: int = 186, timeout: Optional[int] = None):
+        if not self._access_token:
             raise AccountUnauthenticatedException(account=self)
 
+        if timeout is None:
+            timeout = self.default_timeout
+
         key = (connect_host, connect_port)
-        if key not in self.__connectors:
+        if key not in self._connectors:
             connector = CloudConnector(
-                token=self.__access_token,
-                connect_host=connect_host,
-                connect_port=connect_port,
-                application_id=self.application_id
+                access_token=self._access_token,
+                websocket_host=connect_host,
+                websocket_port=connect_port,
+                application_id=self.application_id,
+                timeout=timeout
             )
-            self.__connectors[key] = connector
+            self._connectors[key] = connector
             return connector
-        return self.__connectors[key]
+        return self._connectors[key]
 
     @staticmethod
     def current_time() -> datetime:
@@ -148,15 +168,23 @@ class Account:
         Connectors accessor.
         :return: (Host, Port) -> Cloud connector
         """
-        return self.__connectors
+        return self._connectors
 
     @property
-    def devices(self) -> Dict[str, Device]:
+    def devices(self) -> Tuple['Device']:
         """
         Devices accessor.
         :return: Device ID -> Device object
         """
-        return self.__devices
+        return tuple(self._attached_devices)
+
+    @property
+    def device_ids(self) -> FrozenSet[str]:
+        """
+        Device IDs accessor.
+        :return:
+        """
+        return frozenset([device.device_id for device in self._attached_devices])
 
     def _generate_auth_header(self):
         """
@@ -165,12 +193,12 @@ class Account:
         :raises AccessTokenExpiredException: When access token is considered expired
         :return:
         """
-        if not self.__access_token:
+        if not self._access_token:
             raise AccountUnauthenticatedException(account=self)
         elif not self.access_token_remaining_time:
             raise AccessTokenExpiredException(account=self)
 
-        return {'Authorization': 'Bearer ' + self.__access_token}
+        return {'Authorization': 'Bearer ' + self._access_token}
 
     @classmethod
     async def _do_request(cls, url: str, headers: Optional[Dict[str, str]] = None,
@@ -215,23 +243,23 @@ class Account:
         if not response:
             raise HekrValueError('response', expected='filled response dictionary', got=response)
 
-        if self.__refresh_token != response['refresh_token']:
+        if self._refresh_token != response['refresh_token']:
             self._refresh_token_expires_at = self.current_time() + timedelta(days=30)
 
-        self.__refresh_token = response['refresh_token']
-        self.__access_token = response['access_token']
+        self._refresh_token = response['refresh_token']
+        self._access_token = response['access_token']
         self._user_id = response['user']
         self._access_token_expires_at = self.current_time() + timedelta(seconds=response['expires_in'])
 
     async def refresh_authentication(self, expires_in: int = 86400) -> NoReturn:
         """ Refresh authentication manually. """
-        if self.__refresh_token is None:
+        if self._refresh_token is None:
             raise HekrValueError('refresh_token', 'None', 'refresh token')
 
         if self._refresh_token_expires_at < datetime.now():
             raise RefreshTokenExpiredException()
 
-        response = await self.refresh_authentication_token(self.__refresh_token, expires_in=expires_in)
+        response = await self.refresh_authentication_token(self._refresh_token, expires_in=expires_in)
         _LOGGER.info('Successful token refresh for account %s' % self)
         self._process_auth_response(response)
 
@@ -240,7 +268,7 @@ class Account:
     async def authenticate(self, pid: str = '00000000000', client_type: str = 'ANDROID',
                            attempt_refresh: bool = True) -> NoReturn:
         """Authenticate account with Hekr"""
-        if attempt_refresh and self.__refresh_token:
+        if attempt_refresh and self._refresh_token:
             if datetime.now() < self._refresh_token_expires_at:
                 try:
                     await self.refresh_authentication()
@@ -249,8 +277,8 @@ class Account:
                     _LOGGER.warning('Failed to refresh token on account %s, commencing re-login' % self)
 
         payload = {
-            'username': self.__username,
-            'password': self.__password,
+            'username': self._username,
+            'password': self._password,
             'pid': pid,
             'clientType': client_type,
             'appLoginInfo': {
@@ -270,14 +298,14 @@ class Account:
         except HekrAPIException:
             raise AuthenticationFailedException(account=self)
 
-    async def get_devices(self) -> Dict[str, dict]:
+    async def get_devices_info(self) -> List[DeviceInfo]:
         auth_header = self._generate_auth_header()
         base_url_devices = self.BASE_URL + '/devices?size={}&page={}'
 
         request_devices = 20
         current_page = 0
 
-        devices_info = dict()
+        devices_info = list()
         async with ClientSession() as session:
             more_devices = True
             while more_devices:
@@ -305,65 +333,57 @@ class Account:
 
                     more_devices = (len(response_list) == request_devices)
 
-                    devices_info.update({
-                        device_info['devTid']: device_info
+                    devices_info.extend([
+                        device_info
                         for device_info in response_list
-                    })
+                    ])
 
         return devices_info
 
-    async def update_connectors(self, graceful: bool = True):
-        if graceful:
-            tasks = [
-                connector.update_token_gracefully(self.__access_token)
-                for connector in self.__connectors.values()
-            ]
-            if tasks:
-                await asyncio.wait(tasks)
+    async def update_connectors(self):
+        for connector in self._connectors.values():
+            connector.access_token = self._access_token
 
-        else:
-            for connector in self.__connectors.values():
-                connector.update_token(self.__access_token)
-
-    async def update_devices(self, devices_info: Optional[Dict[str, dict]] = None,
+    async def update_devices(self, devices_info: Optional[List[DeviceInfo]] = None,
                              protocols: Optional[Iterable['Protocol']] = None,
-                             update_existing_device_protocols: bool = False,
-                             with_timeout: float = DEFAULT_TIMEOUT) -> Dict[str, Device]:
+                             create_new_devices: bool = True,
+                             update_existing_device_protocols: bool = False) -> Dict[str, Device]:
         """
         Get devices, and update attributes if an object already exists, or create new ones based on retrieved info.
         :param devices_info: Information about devices (via `get_devices`)
         :param protocols: Use specified protocols for detection
+        :param create_new_devices: Create and attach new devices if found
         :param update_existing_device_protocols: Update protocols for existing devices
-        :param with_timeout: (Optional) Pre-apply timeout on all new and bound devices; will overwrite timeout for
-                             devices using same connector to communicate with cloud on every run
         :return: Dictionary with new devices indexed by device ID
         """
         if devices_info is None:
-            devices_info = await self.get_devices()
+            devices_info = await self.get_devices_info()
 
-        use_protocol_detection = bool(protocols)
+        existing_devices = {device.device_id: device for device in self._attached_devices}
 
         devices = {}
-        for device_id, device_attributes in devices_info.items():
-            detect_protocols = use_protocol_detection
-            if device_id in self.__devices:
-                device = self.__devices[device_id]
-                if update_existing_device_protocols:
-                    detect_protocols = False
+        for device_info in devices_info:
+            device_id = device_info['devTid']
+
+            device = existing_devices.get(device_id)
+            if device is None:
+                if not create_new_devices:
+                    continue
+
+                device = Device.from_device_info(
+                    device_info=device_info,
+                    protocols=protocols
+                )
+
             else:
-                device = Device(device_id=device_id, control_key=device_attributes['ctrlKey'])
-                device.connector = self.get_connector(connect_host=device_attributes['dcInfo']['connectHost'])
-                device.account = self
+                device = self._attached_devices[device_id]
+                device.device_info = device_info
 
-            device.device_info = device_attributes
-            device.connector.timeout = with_timeout
+                if update_existing_device_protocols:
+                    device.detect_protocol(protocols=protocols, set_detected_protocol=True)
 
-            if detect_protocols:
-                for protocol in protocols:
-                    if protocol.compatibility_checker(device):
-                        device.protocol = protocol
-                        break
-                # @TODO: probably raise exception for missing detections
+            connect_host = device_info['dcInfo']['connectHost']
+            device.cloud_connector = self.get_connector(connect_host=connect_host)
 
         if devices:
             _LOGGER.debug('Devices found for account %s, total device count: %d' % (self, len(self.devices)))

@@ -1,8 +1,14 @@
 """Types for Hekr API project."""
 
-from typing import Tuple, Dict, Any, Union, Optional, Callable, TypeVar
+from typing import Tuple, Dict, Any, Union, Optional, Callable, TypeVar, TYPE_CHECKING
 
 from .const import DeviceResponseState
+
+if TYPE_CHECKING:
+    # noinspection PyUnresolvedReferences
+    from .device import Device, Response
+    # noinspection PyUnresolvedReferences
+    from .protocol import Command
 
 # Raw datagram type
 RawDataType = Union[str, bytes, bytearray]
@@ -12,19 +18,19 @@ JSONDataType = Dict[str, Optional[Union[str, int]]]
 CommandData = Dict[str, Any]
 MessageData = Dict[str, Union[str, int, float]]
 
-DecodeResult = Tuple['Command', CommandData, int]
+MessageEncoded = TypeVar('MessageEncoded')
+CommandEncoded = TypeVar('CommandEncoded')
+
+EncodedRequest = str
 MessageID = int
 DeviceID = str
 Action = str
+CommandID = int
+CommandName = str
 
-ProcessedData = Union[dict, DecodeResult]
-DeviceResponse = Tuple[MessageID, DeviceResponseState, Action, ProcessedData]
-ProcessedResponse = Tuple[MessageID, DeviceResponseState, Action, ProcessedData, Optional['Device']]
-
-HekrCallback = Callable[[Optional['Device'], MessageID, DeviceResponseState, Action, ProcessedData], Any]
+DeviceCallback = Callable[['Response'], Any]
 
 DeviceInfo = Dict[str, Any]
-AnyCommand = Union[int, str, 'Command']
-MessageEncoded = TypeVar('MessageEncoded')
-CommandEncoded = TypeVar('CommandEncoded')
-DevicesDict = Dict[DeviceID, 'Device']
+
+# Helper types
+AnyCommand = Union[CommandID, CommandName, 'Command']

@@ -15,11 +15,19 @@ class FrameType(Enum):
 
 #: Device response states
 class DeviceResponseState(Enum):
-    """Response state of `make_request`"""
+    """
+    Response state of `make_request`
+
+    Glossary:
+    _Invalid_ responses are of a format that can't be loaded by `process_response` methods.
+    _Unknown_ responses are parsed responses that have no associated command or action.
+    _Successful_ responses are decoded responses that translate into successful request execution.
+    _Failed_ responses are decoded responses that translate into failed (not invalid!) request execution.
+    """
+    INVALID = -1
     UNKNOWN = 0
     SUCCESS = 1
     FAILURE = 2
-    WAIT_NEXT = 3
 
 
 class DeviceConnectionType(Enum):
@@ -46,13 +54,14 @@ DEFAULT_REQUEST_RETRIES = 2
 #: Seconds count before attempting to perform next request iteration
 DEFAULT_RETRY_DELAY = 1
 
-#: Default host for controlling devices via websockets
+#: Default host for controlling devices via websocket
 DEFAULT_WEBSOCKET_HOST = 'fra-hub.hekreu.me'
 DEFAULT_WEBSOCKET_PORT = 186
 
 #: Default connection timeout
 DEFAULT_TIMEOUT = 10.0
 
+#: Device actions in requests/responses
 ACTION_DEVICE_AUTH_REQUEST = 'appDevAuth'
 ACTION_DEVICE_AUTH_RESPONSE = 'appDevAuthResp'
 ACTION_CLOUD_AUTH_REQUEST = 'appLogin'

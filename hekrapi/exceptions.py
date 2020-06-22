@@ -128,8 +128,7 @@ class HekrAPIExpectedGotException(HekrAPIException):
             expected = [expected]
 
         expected = ', '.join([
-            ('`' + v.__name__ + '`' if isinstance(v, type)
-            else str(v))
+            ('`' + v.__name__ + '`' if isinstance(v, type) else str(v))
             for v in expected
         ])
 
@@ -158,3 +157,7 @@ class HekrValueSizeError(HekrAPIExpectedGotException):
 
 class HekrResponseStatusError(HekrAPIExpectedGotException):
     default_message = 'Response status code for request to {variable} is invalid (expected {expected}; got {got})'
+
+
+class HekrComparisonError(HekrAPIFormattedException, TypeError):
+    default_message = 'Comparing {type(lhs)} and {type(rhs)} is not supported.'

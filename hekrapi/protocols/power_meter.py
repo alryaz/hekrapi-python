@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-""" Basic protocol definition for a smart power meter """
+"""Basic protocol definition for a smart power meter"""
 from enum import IntEnum
 
-from ..protocol import Protocol, TO_STR, TO_FLOAT, TO_BOOL, TO_SIGNED_FLOAT, Command, Argument
-from ..const import FrameType
+from hekrapi.protocol import Protocol, TO_STR, TO_FLOAT, TO_BOOL, TO_SIGNED_FLOAT, Command, Argument
+from hekrapi.const import FrameType
 
 __all__ = [
     "VoltageWarning",

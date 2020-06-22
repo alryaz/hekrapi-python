@@ -17,13 +17,13 @@ import copy
 from enum import Flag, auto, IntEnum
 from functools import partial
 from json import dumps as json_dumps, loads as json_loads, JSONDecodeError
-from typing import TYPE_CHECKING, Union, List, Dict, Optional, Callable, Any, Tuple
+from typing import TYPE_CHECKING, Union, List, Dict, Optional, Callable, Any, Tuple, NoReturn
 
 from .const import FRAME_START_IDENTIFICATION, FrameType
 from .exceptions import CommandNotFoundException, HekrTypeError, HekrValueError, InvalidMessagePrefixException, \
     InvalidMessageLengthException, InvalidMessageChecksumException, InvalidMessageFrameTypeException, \
-    InvalidDataMissingKeyException, InvalidDataLessThanException, InvalidDataGreaterThanException
-from .types import CommandData, AnyCommand, DecodeResult, MessageEncoded, MessageData, RawDataType, JSONDataType
+    InvalidDataMissingKeyException, InvalidDataLessThanException, InvalidDataGreaterThanException, HekrComparisonError
+from .types import CommandData, AnyCommand, MessageEncoded, MessageData, RawDataType, JSONDataType
 
 if TYPE_CHECKING:
     from .device import Device
@@ -31,15 +31,16 @@ if TYPE_CHECKING:
 
 def signed_float_converter(threshold, type_input=int, type_output=float):
     """ Generates a signed float converter. """
+
     def convert_input(value):
         """ Adds negative value to threshold to restore original """
         value = type_input(value)
-        return threshold-value if value < 0 else value
+        return threshold - value if value < 0 else value
 
     def convert_output(value):
         """ Inverts sign if original is equal to or greater than threshold """
         value = type_output(value)
-        return value if value < threshold else threshold-value
+        return value if value < threshold else threshold - value
 
     return convert_input, convert_output
 
@@ -132,6 +133,25 @@ class Argument:
         """
         return '<{}({})>'.format(self.__class__.__name__, self.name)
 
+    def __eq__(self, other: 'Argument'):
+        """
+        Compare two argument objects.
+        :param other:
+        :return:
+        """
+        if not isinstance(other, Argument):
+            raise HekrComparisonError(lhs=self, rhs=other)
+        return (self.name == other.name
+                and self.variable == other.variable
+                and self.length == other.length
+                and self.type_input == other.type_input
+                and self.type_output == other.type_output
+                and self.value_min == other.value_min
+                and self.value_max == other.value_max
+                and self.value_default == other.value_default
+                and self.decimals == other.decimals
+                and self.multiplier == other.multiplier)
+
     @property
     def decimals(self) -> int:
         """Getter for decimals count to round result to
@@ -142,16 +162,16 @@ class Argument:
         Returns:
             int -- Floating point digits
         """
-        if self.__decimals is None:
+        if self._decimals is None:
             decimals = str(self.multiplier)[::-1].find('.')
             return 0 if decimals < 0 else decimals
 
-        return self.__decimals
+        return self._decimals
 
     @decimals.setter
     def decimals(self, value):
         """Getter for decimals count to round result to"""
-        self.__decimals = value
+        self._decimals = value
 
     @property
     def variable(self) -> str:
@@ -163,18 +183,19 @@ class Argument:
         Returns:
             str -- Variable name
         """
-        if self.__variable is None:
+        if self._variable is None:
             return self.name
-        return self.__variable
+        return self._variable
 
     @variable.setter
     def variable(self, value):
         """Setter for variable name"""
-        self.__variable = value
+        self._variable = value
 
 
 class Command:
     """Base command class for HekrAPI"""
+
     def __init__(self,
                  command_id: int,
                  frame_type: FrameType = FrameType.SEND,
@@ -200,9 +221,9 @@ class Command:
 
         # circular checking prevents following private attributes
         # from being created automatically
-        self.__response_command_id = None
-        self.__invoke_command_id = None
-        self.__frame_type = None
+        self._response_command_id = None
+        self._invoke_command_id = None
+        self._frame_type = None
 
         self.command_id = command_id
         self.name = name
@@ -242,6 +263,10 @@ class Command:
         """
         return self.command_id
 
+    def __eq__(self, other: 'Command'):
+        return (self.command_id == other.command_id
+                and self.name == other.name)
+
     @property
     def command_id(self) -> int:
         """
@@ -250,7 +275,7 @@ class Command:
         :return: Command ID.
         :rtype: int
         """
-        return self.__command_id
+        return self._command_id
 
     @command_id.setter
     def command_id(self, value: int) -> None:
@@ -270,7 +295,7 @@ class Command:
             raise HekrValueError(variable='command_id',
                                  expected='integer from 0 to 255',
                                  got=value)
-        self.__command_id = value
+        self._command_id = value
 
     @property
     def frame_type(self) -> FrameType:
@@ -280,7 +305,7 @@ class Command:
         :return: Frame type for command.
         :rtype: FrameType
         """
-        return self.__frame_type
+        return self._frame_type
 
     @frame_type.setter
     def frame_type(self, value: FrameType) -> None:
@@ -306,7 +331,7 @@ class Command:
         except KeyError:
             # noinspection PyTypeChecker
             raise HekrValueError(variable='frame_type',
-                                 expected=', '.join(map(lambda x: "'"+x.name.lower()+"'", FrameType)) +
+                                 expected=', '.join(map(lambda x: "'" + x.name.lower() + "'", FrameType)) +
                                           " (case-insensitive)",
                                  got=value)
         except ValueError:
@@ -324,7 +349,7 @@ class Command:
                                  expected='`%s` due to `invoke_command_id` being set' % FrameType.RECEIVE,
                                  got=new_frame_type)
 
-        self.__frame_type = new_frame_type
+        self._frame_type = new_frame_type
 
     @property
     def arguments(self) -> List[Argument]:
@@ -368,7 +393,7 @@ class Command:
 
         :return: int
         """
-        return self.__response_command_id
+        return self._invoke_command_id
 
     @invoke_command_id.setter
     def invoke_command_id(self, value):
@@ -386,7 +411,7 @@ class Command:
                 raise HekrValueError(variable='invoke_command_id',
                                      expected='>= 0',
                                      got=value)
-        self.__invoke_command_id = value
+        self._invoke_command_id = value
 
     @property
     def response_command_id(self) -> int:
@@ -395,7 +420,7 @@ class Command:
 
         :return: int
         """
-        return self.__response_command_id
+        return self._response_command_id
 
     @response_command_id.setter
     def response_command_id(self, value):
@@ -413,16 +438,20 @@ class Command:
                 raise HekrValueError(variable='response_command_id',
                                      expected='>= 0',
                                      got=value)
-        self.__response_command_id = value
+        self._response_command_id = value
 
     @staticmethod
-    def _process_arguments(callback: Callable[[Union[str, Argument], Any], Any], arguments: List[Argument],
-                           data: Optional[CommandData] = None, use_variable_names: bool = False,
-                           filter_values: bool = True, ignore_extra: bool = False,
-                           pass_argument: bool = False, raise_for_error: bool = True) -> bool:
+    def _process_arguments(callback: Callable[[Union[str, Argument], Any], Any],
+                           arguments: List[Argument],
+                           data: Optional[CommandData] = None,
+                           use_variable_names: bool = False,
+                           filter_values: bool = True,
+                           ignore_extra: bool = False,
+                           pass_argument: bool = False) -> NoReturn:
         if data is None:
             data = dict()
 
+        call_after = []
         argument_keys = set()
 
         for argument in arguments:
@@ -431,28 +460,22 @@ class Command:
 
             if value_input is None:
                 if argument.value_default is None:
-                    if raise_for_error:
-                        raise InvalidDataMissingKeyException(data_key=key)
-                    return None
+                    raise InvalidDataMissingKeyException(data_key=key)
                 value_input = argument.value_default
 
             argument_keys.add(key)
 
             if argument.value_min is not None and argument.value_min > value_input:
-                if raise_for_error:
-                    raise InvalidDataLessThanException(
-                        data_key=key,
-                        value=value_input,
-                        value_min=argument.value_min)
-                return None
+                raise InvalidDataLessThanException(
+                    data_key=key,
+                    value=value_input,
+                    value_min=argument.value_min)
 
             if argument.value_max is not None and argument.value_max < value_input:
-                if raise_for_error:
-                    raise InvalidDataGreaterThanException(
-                        data_key=key,
-                        value=value_input,
-                        value_max=argument.value_max)
-                return None
+                raise InvalidDataGreaterThanException(
+                    data_key=key,
+                    value=value_input,
+                    value_max=argument.value_max)
 
             if filter_values:
                 if argument.multiplier:
@@ -460,37 +483,44 @@ class Command:
 
                 value_input = argument.type_input(value_input)
 
-            callback(argument if pass_argument else argument.variable, value_input)
+            call_after.append(
+                partial(
+                    callback, argument if pass_argument else argument.variable,
+                    value_input
+                )
+            )
 
         if ignore_extra:
             extra_keys = data.keys() - argument_keys
-            if extra_keys:
-                if raise_for_error:
-                    raise HekrValueError(variable='data',
-                                         expected='dict[%s]' % ', '.join(extra_keys),
-                                         got=', '.join(map(str, data.keys())))
-                return False
+            raise HekrValueError(variable='data',
+                                 expected='dict[%s]' % ', '.join(extra_keys),
+                                 got=', '.join(map(str, data.keys())))
 
-        return True
+        # Process callbacks after everything is OK
+        for run_callback in call_after:
+            run_callback()
 
     # Command encoding/decoding: Raw
-    def encode_arguments_raw(self, data: Optional[CommandData] = None, use_variable_names: bool = False,
-                             filter_values: bool = True, raise_for_error: bool = True) \
-            -> Optional[bytearray]:
+    def encode_arguments_raw(self,
+                             data: Optional[CommandData] = None,
+                             use_variable_names: bool = False,
+                             filter_values: bool = True) -> bytearray:
         """Encode arguments into an array of bytes."""
         result = bytearray()
         appender = partial(append_bytes_to_array, result)
 
         # noinspection PyTypeChecker
-        if not Command._process_arguments(callback=appender, arguments=self.arguments, data=data,
-                                          use_variable_names=use_variable_names, filter_values=filter_values,
-                                          pass_argument=True, raise_for_error=raise_for_error):
-            return None
+        Command._process_arguments(callback=appender, arguments=self.arguments, data=data,
+                                   use_variable_names=use_variable_names, filter_values=filter_values,
+                                   pass_argument=True)
 
         return result
 
-    def decode_arguments_raw(self, data: bytes, use_variable_names: bool = False, filter_values: bool = True,
-                             ignore_extra: bool = False, raise_for_error: bool = False) -> Optional[CommandData]:
+    def decode_arguments_raw(self,
+                             data: Union[bytes, bytearray],
+                             use_variable_names: bool = False,
+                             filter_values: bool = True,
+                             ignore_extra: bool = False) -> CommandData:
         """Decode passed data"""
         decoded = data[5:-1]
 
@@ -502,9 +532,7 @@ class Command:
 
             next_pos = current_pos + argument.length
             if next_pos > data_length:
-                if raise_for_error:
-                    raise InvalidDataMissingKeyException(data_key=key)
-                return None
+                raise InvalidDataMissingKeyException(data_key=key)
 
             value_output = int.from_bytes(decoded[current_pos:next_pos], byteorder='big', signed=False)
 
@@ -522,24 +550,17 @@ class Command:
             current_pos = next_pos
 
         if not ignore_extra and current_pos < data_length:
-            if raise_for_error:
-                raise HekrValueError(variable='len(data)', expected=current_pos, got=data_length)
-            return None
+            raise HekrValueError(variable='len(data)', expected=current_pos, got=data_length)
 
         return result
 
     def encode_raw(self, data: Optional[CommandData] = None, frame_number: int = 1, use_variable_names: bool = False,
-                   filter_values: bool = True, only_datagram: bool = False, raise_for_error: bool = True) \
-            -> Optional[Union[Dict[str, Any], str]]:
+                   filter_values: bool = True, only_datagram: bool = False) -> Union[Dict[str, Any], str]:
         encoded_arguments = self.encode_arguments_raw(
             data=data,
             use_variable_names=use_variable_names,
-            filter_values=filter_values,
-            raise_for_error=raise_for_error
+            filter_values=filter_values
         )
-
-        if encoded_arguments is None:
-            return None
 
         raw = bytearray()
         raw.append(FRAME_START_IDENTIFICATION)
@@ -558,13 +579,11 @@ class Command:
         return {"raw": datagram}
 
     @staticmethod
-    def convert_raw_data(data: Union[RawDataType, MessageData], raise_for_error: bool = True) -> Optional[bytearray]:
+    def convert_raw_data(data: Union[RawDataType, MessageData]) -> bytearray:
         if isinstance(data, dict):
             data = data.get('raw')
             if not data:
-                if raise_for_error:
-                    raise HekrValueError(variable='data', got=data, expected='Dictionary with "raw" key')
-                return None
+                raise HekrValueError(variable='data', got=data, expected='Dictionary with "raw" key')
 
         if isinstance(data, bytearray):
             return data
@@ -575,87 +594,70 @@ class Command:
         elif isinstance(data, bytes):
             return bytearray(data)
 
-        if raise_for_error:
-            raise HekrTypeError(variable='raw', expected=[str, bytes, bytearray], got=type(data))
-        return None
+        raise HekrTypeError(variable='raw', expected=[str, bytes, bytearray], got=type(data))
 
     @staticmethod
-    def validate_raw_datagram(decoded: bytearray, raise_for_error: bool = True) -> bool:
+    def validate_raw_datagram(decoded: bytearray) -> NoReturn:
         # Common prefix is located at first byte
         if decoded[0] != FRAME_START_IDENTIFICATION:
-            if raise_for_error:
-                raise InvalidMessagePrefixException(decoded)
-            return False
+            raise InvalidMessagePrefixException(decoded)
 
         # Frame length is located at second byte
         frame_length = decoded[1]
         if frame_length != len(decoded):
-            if raise_for_error:
-                raise InvalidMessageLengthException(decoded)
-            return False
+            raise InvalidMessageLengthException(decoded)
 
         # Checksum is located at last byte
         checksum = decoded[-1]
         current_checksum = sum(decoded[:-1]) % 0x100
         if checksum != current_checksum:
-            if raise_for_error:
-                raise InvalidMessageChecksumException(decoded)
-            return False
-
-        return True
+            raise InvalidMessageChecksumException(decoded)
 
     @staticmethod
-    def get_command_id_from_raw(data: Union[RawDataType, MessageData], validate: bool = True,
-                                raise_for_error: bool = True) -> Optional[int]:
+    def get_command_id_from_raw(data: Union[RawDataType, MessageData], validate: bool = True) -> int:
         """
         Helper method to retrieve command ID from raw datagram.
-        :param raise_for_error:
         :param data:
         :param validate:
-        :return: int - Command ID | None - error (if raise_for_error is True)
+        :return: int - Command ID
         """
         decoded = data if isinstance(data, bytearray) \
-            else Command.convert_raw_data(data, raise_for_error=raise_for_error)
+            else Command.convert_raw_data(data)
 
-        if decoded is None:
-            # It would have raised an exception by this point
-            return None
-
-        if validate and not Command.validate_raw_datagram(decoded, raise_for_error=raise_for_error):
-            # It would have raised an exception by this point
-            return None
+        if validate:
+            Command.validate_raw_datagram(decoded)
 
         # Command ID is located at 5th byte
         return decoded[4]
 
     # Command encoding/decoding: JSON
     def encode_arguments_json(self, data: CommandData, use_variable_names: bool = False, filter_values: bool = True,
-                              ignore_extra: bool = False, raise_for_error: bool = True) -> Optional[Dict[str, Any]]:
+                              ignore_extra: bool = False) -> Dict[str, Any]:
         result = dict()
-        if not Command._process_arguments(callback=result.__setitem__, arguments=self.arguments, data=data,
-                                          use_variable_names=use_variable_names, filter_values=filter_values,
-                                          pass_argument=False, ignore_extra=ignore_extra,
-                                          raise_for_error=raise_for_error):
-            return None
+        Command._process_arguments(
+            callback=result.__setitem__,
+            arguments=self.arguments,
+            data=data,
+            use_variable_names=use_variable_names,
+            filter_values=filter_values,
+            pass_argument=False,
+            ignore_extra=ignore_extra
+        )
 
         return result
 
     def decode_arguments_json(self, data: Dict[str, Any], use_variable_names: bool = False, filter_values: bool = True,
-                              ignore_extra: bool = False, raise_for_error: bool = True) -> Optional[CommandData]:
+                              ignore_extra: bool = False) -> CommandData:
         """Decode passed data"""
         if len(self.arguments) > len(data) or not ignore_extra and len(self.arguments) < len(data):
-            if raise_for_error:
-                raise HekrValueError(variable='data', expected=len(self.arguments), got=len(data))
-            return None
+            raise HekrValueError(variable='data', expected=len(self.arguments), got=len(data))
 
         result = {}
         for argument in self.arguments:
             key = argument.variable if use_variable_names else argument.name
 
             if argument.variable not in data:
-                if raise_for_error:
-                    raise InvalidDataMissingKeyException(data_key=key)
-                return None
+                raise InvalidDataMissingKeyException(data_key=key)
 
             value_output = data[argument.variable]
 
@@ -672,65 +674,48 @@ class Command:
         return result
 
     def encode_json(self, data: Optional[CommandData] = None, use_variable_names: bool = False,
-                    filter_values: bool = True, raise_for_error: bool = True) -> Optional[MessageEncoded]:
+                    filter_values: bool = True) -> MessageEncoded:
         encoded_arguments = self.encode_arguments_json(
             data=data,
             use_variable_names=use_variable_names,
-            filter_values=filter_values,
-            raise_for_error=raise_for_error
+            filter_values=filter_values
         )
         encoded_arguments["cmdId"] = self.command_id
 
         return encoded_arguments
 
     @staticmethod
-    def convert_json_data(data: Union[str, MessageData], raise_for_error: bool = True) -> Optional[JSONDataType]:
+    def convert_json_data(data: Union[str, MessageData]) -> JSONDataType:
         if isinstance(data, str):
             try:
                 return json_loads(data)
 
             except JSONDecodeError:
-                if raise_for_error:
-                    raise HekrValueError(variable='data', expected=['JSON array', 'dictionary'], got=data)
-                return None
+                raise HekrValueError(variable='data', expected=['JSON array', 'dictionary'], got=data)
 
         elif isinstance(data, dict):
             return data
 
-        if raise_for_error:
-            raise HekrTypeError(variable='data', expected=[str, dict], got=type(data))
-        return None
+        raise HekrTypeError(variable='data', expected=[str, dict], got=type(data))
 
     @staticmethod
-    def validate_json_dict(data: JSONDataType, raise_for_error: bool = True) -> bool:
+    def validate_json_dict(data: JSONDataType) -> NoReturn:
         skip_keys_length = 0
         if 'raw' in data:
             skip_keys_length += 1
 
         if 'cmdId' not in data:
-            if raise_for_error:
-                raise HekrValueError(variable='data[cmdId]', expected='command ID', got=None)
-            return False
+            raise HekrValueError(variable='data[cmdId]', expected='command ID', got=None)
 
         if not len(data) - skip_keys_length:
-            if raise_for_error:
-                raise HekrValueError(variable='data', expected='data', got='empty dictionary')
-            return False
-
-        return True
+            raise HekrValueError(variable='data', expected='data', got='empty dictionary')
 
     @staticmethod
-    def get_command_id_from_json(data: Union[str, MessageData], validate: bool = True, raise_for_error: bool = True) \
-            -> Optional[int]:
-        decoded = data if isinstance(data, dict) else Command.convert_json_data(data, raise_for_error=raise_for_error)
+    def get_command_id_from_json(data: Union[str, MessageData], validate: bool = True) -> int:
+        decoded = data if isinstance(data, dict) else Command.convert_json_data(data)
 
-        if decoded is None:
-            # It would have raised an exception by this point
-            return None
-
-        if validate and not Command.validate_json_dict(data):
-            # It would have raised an exception by this point
-            return None
+        if validate:
+            Command.validate_json_dict(decoded)
 
         return data['cmdId']
 
@@ -781,7 +766,7 @@ class Protocol:
         :param item:
         :return:
         """
-        command = self.get_command_by_name(item, raise_for_error=False)
+        command = self.get_command_by_name(item, raise_for_none=False)
 
         if command is not None:
             def encode_command(frame_number: int = 1,
@@ -822,6 +807,17 @@ class Protocol:
             CommandNotFoundException: if command is not found.
         """
         return self.get_command(key)
+
+    def __eq__(self, other: 'Protocol'):
+        """
+        Compare two protocols.
+        :param other:
+        :return:
+        """
+        return (self._commands == other.commands
+                and self.default_port == other.default_port
+                and self.default_encoding_type == other.default_encoding_type
+                and self.compatibility_checker == other.compatibility_checker)
 
     @property
     def commands(self) -> List[Command]:
@@ -887,7 +883,7 @@ class Protocol:
             resulting_commands_list = [
                 command for command in resulting_commands_list
                 if command.name not in new_command_names
-                or command.command_id in new_commands_by_id
+                   or command.command_id in new_commands_by_id
             ]
 
         self.commands = resulting_commands_list
@@ -898,8 +894,7 @@ class Protocol:
                frame_number: int = 1,
                use_variable_names: bool = False,
                filter_values: bool = True,
-               encoding_type: Optional[Encoding] = None,
-               raise_for_error: bool = True) -> Optional[MessageData]:
+               encoding_type: Optional[Encoding] = None) -> MessageData:
         """
         General encoding for protocol.
         :param command: Command object/ID/Name
@@ -910,18 +905,13 @@ class Protocol:
         :param encoding_type:
         :return:
         """
-        command = self.get_command(command, raise_for_error=raise_for_error)
-
-        if command is None:
-            return None
+        command = self.get_command(command)
 
         if encoding_type is None:
             encoding_type = self.default_encoding_type
 
         elif not isinstance(encoding_type, Encoding):
-            if raise_for_error:
-                raise HekrTypeError(variable='encoding_type', expected=Encoding, got=type(encoding_type))
-            return None
+            raise HekrTypeError(variable='encoding_type', expected=Encoding, got=type(encoding_type))
 
         encoded_data = dict()
         if encoding_type & Encoding.JSON:
@@ -947,7 +937,7 @@ class Protocol:
                data: MessageData,
                use_variable_names: bool = False,
                filter_values: bool = True,
-               encoding_type: Optional[Encoding] = None) -> DecodeResult:
+               encoding_type: Optional[Encoding] = None) -> Tuple[Command, Dict[str, Any], Optional[int]]:
         """
         Decode data.
         :param data:
@@ -960,71 +950,96 @@ class Protocol:
             encoding_type = self.default_encoding_type
 
         if encoding_type & Encoding.RAW:
-            decoder = self.decode_raw
+            command, data, frame_number = self.decode_raw(
+                raw=data,
+                use_variable_names=use_variable_names,
+                filter_values=filter_values
+            )
 
         elif encoding_type & Encoding.JSON:
-            decoder = self.decode_transparent_json
+            frame_number = None
+            command, data = self.decode_json(
+                json=data,
+                use_variable_names=use_variable_names,
+                filter_values=filter_values
+            )
 
         else:
             raise HekrValueError(variable='encoding_type', expected='type(Encoding)', got=encoding_type)
 
-        return decoder(
-            data=data,
-            use_variable_names=use_variable_names,
-            filter_values=filter_values
-        )
+        return command, data, frame_number
 
-    def encode_raw(self, command: Command, *args, raise_for_error: bool = True, **kwargs) -> Optional[MessageData]:
+    def encode_raw(self, command: Command, *args, **kwargs) -> Optional[MessageData]:
         """
         Encode data into raw datagram.
-        :param raise_for_error:
         :param command: Command object/ID/Name
         :return: Raw datagram
         :rtype: str
         """
-        command = self.get_command(command, raise_for_error=raise_for_error)
+        command = self.get_command(command)
 
         if command is None:
             return None
 
-        return command.encode_raw(*args, raise_for_error=raise_for_error, **kwargs)
+        return command.encode_raw(*args, **kwargs)
 
     def decode_raw(self,
-                   data: Union[RawDataType, MessageData],
+                   raw: Union[RawDataType, MessageData],
                    use_variable_names: bool = False,
                    filter_values: bool = True,
-                   raise_for_error: bool = True) -> Optional[DecodeResult]:
+                   ignore_extra: bool = False) -> Tuple[Command, Dict[str, Any], int]:
         """
         Decode raw datagram
-        :param data: Raw datagram
+        :param raw: Raw datagram
         :param use_variable_names: Use variable names as data keys
         :param filter_values: Apply filters to values
-        :param raise_for_error:
+        :param ignore_extra:
         :return: command object, dictionary of values, frame number
-        :rtype: (Command, dict[str, Any], int) | None - error (if raise_for_error is True)
+        :rtype: (Command, dict[str, Any], int)
         """
-        decoded = Command.convert_raw_data(data, raise_for_error=raise_for_error)
-        if decoded is None:
-            return None
+        raw_bytearray = Command.convert_raw_data(raw)
+        command_id = Command.get_command_id_from_raw(raw_bytearray, validate=True)
+        command = self.get_command_by_id(command_id)
 
-        command_id = Command.get_command_id_from_raw(decoded, raise_for_error=raise_for_error)
-        if command_id is None:
-            return None
+        if raw_bytearray[2] != command.frame_type.value:
+            raise InvalidMessageFrameTypeException(raw)
 
-        command = self.get_command_by_id(command_id, raise_for_error=raise_for_error)
-        if command is None:
-            return None
+        frame_number = raw_bytearray[3]
+        argument_values = command.decode_arguments_raw(
+            data=raw_bytearray,
+            use_variable_names=use_variable_names,
+            filter_values=filter_values,
+            ignore_extra=ignore_extra
+        )
 
-        if decoded[2] != command.frame_type.value:
-            if raise_for_error:
-                raise InvalidMessageFrameTypeException(data)
-            return None
+        return command, argument_values, frame_number
 
-        frame_number = decoded[3]
+    def decode_json(self,
+                    json: Union[str, MessageData],
+                    use_variable_names: bool = False,
+                    filter_values: bool = True,
+                    ignore_extra: bool = False) -> Tuple[Command, Dict[str, Any]]:
+        """
+        Decode JSON data.
 
-        data = command.decode_arguments_raw(decoded, use_variable_names, filter_values, raise_for_error=raise_for_error)
+        :param json: (optionally decoded) JSON string
+        :param use_variable_names: Use variable names instead of argument names
+        :param filter_values: Apply variable filters
+        :param ignore_extra: Ignore extra keys
+        :return: command object, dictionary of values
+        """
+        json_dict = Command.convert_json_data(json)
+        command_id = Command.get_command_id_from_json(json_dict, validate=True)
+        command = self.get_command_by_id(command_id)
 
-        return command, data, frame_number
+        argument_values = command.decode_arguments_json(
+            data=json_dict,
+            use_variable_names=use_variable_names,
+            filter_values=filter_values,
+            ignore_extra=ignore_extra
+        )
+
+        return command, argument_values
 
     def encode_json(self, command: Command, *args, **kwargs) -> MessageData:
         command = self.get_command(command)
@@ -1038,15 +1053,16 @@ class Protocol:
         """
         if self.compatibility_checker:
             return self.compatibility_checker(device)
+
         raise NotImplementedError
 
-    def get_command_by_id(self, command_id: int, raise_for_error: bool = True) -> Optional[Command]:
+    def get_command_by_id(self, command_id: int, raise_for_none: bool = True) -> Optional[Command]:
         """
         Get command definition object by its ID.
 
         :param command_id: Command ID
         :return: Command object
-        :param raise_for_error: Raise exception on command not being found
+        :param raise_for_none: Raise exception on command not being found
         :rtype: Command
         :raises:
             CommandNotFoundException: Command definition not found within protocol
@@ -1055,16 +1071,17 @@ class Protocol:
             if command.command_id == command_id:
                 return command
 
-        if raise_for_error:
+        if raise_for_none:
             raise CommandNotFoundException(command_id)
+
         return None
 
-    def get_command_by_name(self, name: str, raise_for_error: bool = True) -> Optional[Command]:
+    def get_command_by_name(self, name: str, raise_for_none: bool = True) -> Optional[Command]:
         """
         Get command definition object by its name.
 
         :param name: Command name
-        :param raise_for_error: Raise exception on command not being found
+        :param raise_for_none: Raise exception on command not being found
         :return: Command object
         :rtype: Command
         :raises:
@@ -1074,15 +1091,16 @@ class Protocol:
             if command.name == name:
                 return command
 
-        if raise_for_error:
+        if raise_for_none:
             raise CommandNotFoundException(name)
+
         return None
 
-    def get_command(self, command: AnyCommand, raise_for_error: bool = True) -> Optional[Command]:
+    def get_command(self, command: AnyCommand, raise_for_none: bool = True) -> Optional[Command]:
         """
         Get command by its ID/name (or cycle-return `Command` object).
 
-        :param raise_for_error:
+        :param raise_for_none:
         :param command: Command ID/name, `Command` object
         :type command: int, str, Command
         :return:
@@ -1093,12 +1111,12 @@ class Protocol:
             return command
 
         if isinstance(command, int):
-            return self.get_command_by_id(command, raise_for_error=raise_for_error)
+            return self.get_command_by_id(command, raise_for_none=raise_for_none)
 
         if isinstance(command, str):
-            return self.get_command_by_name(command, raise_for_error=raise_for_error)
+            return self.get_command_by_name(command, raise_for_none=raise_for_none)
 
-        if raise_for_error:
+        if raise_for_none:
             raise TypeError(
                 "Argument 'command' (type %s) does not evaluate to any supported command type" %
                 command)
@@ -1124,8 +1142,10 @@ class Protocol:
                             "name": argument.name,
                             "variable": argument.variable,
                             "byte_length": argument.length,
-                            "type_input": argument.type_input.__name__,
-                            "type_output": argument.type_output.__name__,
+                            "type_input": ("%s" if isinstance(argument.type_input, type)
+                                           else "<%s>") % argument.type_input.__name__,
+                            "type_output": ("%s" if isinstance(argument.type_output, type)
+                                            else "<%s>") % argument.type_output.__name__,
                             "value_min": argument.value_min,
                             "value_max": argument.value_max,
                             "value_default": argument.value_default,
@@ -1143,6 +1163,7 @@ class Protocol:
     default_serialization_format = 'json'
     serialization_formats = {
         'json': lambda definition: json_dumps(definition, ensure_ascii=False),
+        'json_pretty': lambda definition: json_dumps(definition, ensure_ascii=False, indent=4)
     }
 
     def get_definition_serialized(self, output_format: Optional[str] = None) -> str:
@@ -1156,8 +1177,9 @@ class Protocol:
         """
         if output_format is None:
             output_format = self.default_serialization_format
+
         elif output_format not in self.serialization_formats:
-            raise HekrValueError(variable='output_format', expected=['json'], got=output_format)
+            raise HekrValueError(variable='output_format', expected=self.serialization_formats, got=output_format)
 
         definition = self.get_definition_dict()
 
