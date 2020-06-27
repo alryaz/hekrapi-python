@@ -1,163 +1,256 @@
-# -*- coding: utf-8 -*-
-"""Exception classes for Hekr API"""
+"""Exceptions and errors for Hekr API"""
 
 
 class HekrAPIException(BaseException):
-    pass
+    base_description: str = NotImplemented
+    extended_description: str = NotImplemented
+
+    def __str__(self):
+        if self.base_description is NotImplemented:
+            return BaseException.__str__(self)
+        if self.extended_description is NotImplemented:
+            return self.base_description.format(*self.args)
+        return (self.base_description + ': ' + self.extended_description).format(*self.args)
+
+    def __repr__(self):
+        return self.__str__()
 
 
-class ConnectionTimeoutException(HekrAPIException):
-    pass
+# Account-related exception
+class AccountException(HekrAPIException):
+    base_description = "Exception on account {}"
 
 
-class HekrAPIFormattedException(HekrAPIException):
-    """Base exception class for all HekrAPI exceptions"""
-    default_message = 'HekrAPI Exception occurred'
-
-    def __init__(self, *args, **kwargs):
-        self.arguments = list(args)
-        arguments_text = ', '.join([str(a) for a in self.arguments])
-        kwargs['reason'] = kwargs.get('reason') or 'unknown'
-        # @TODO: remove 'message' key from kwargs
-        super().__init__(
-            (kwargs.get('message', self.default_message)).format(
-                **kwargs) + (' (' + arguments_text + ')' if arguments_text else ''))
+# -- Account low level response exceptions
+class AccountResponseException(AccountException):
+    base_description = "Request exception on account {}"
 
 
-class InvalidMessageException(HekrAPIFormattedException):
-    """Base exception class for other message-related exceptions"""
-    default_message = 'Invalid Hekr message provided'
+class AccountUnknownResponseException(AccountResponseException):
+    extended_description = "unknown response (status: {})"
 
 
-class InvalidMessagePrefixException(InvalidMessageException):
-    """Raised when the first character within the datagram does not equate 0x48"""
-    default_message = 'Message prefix is not standard'
+class AccountErrorResponseException(AccountResponseException):
+    extended_description = "error response (status: {}, error content: {})"
 
 
-class InvalidMessageLengthException(InvalidMessageException):
-    """Raised when datagram data length does not equate one provided by the datagram"""
-    default_message = 'Message length does not match expected'
+class AccountJSONInvalidException(AccountUnknownResponseException):
+    extended_description = "invalid response (json error: {})"
 
 
-class InvalidMessageChecksumException(InvalidMessageException):
-    """Raised when the calculated checksum does not equate one provided by the datagram"""
-    default_message = 'Message checksum does not match expected'
+# -- Account authentication exceptions
+class AccountAuthenticationException(HekrAPIException):
+    base_description = "Authentication error on account {}"
 
 
-class InvalidMessageFrameTypeException(InvalidMessageException):
-    """Raised when deduced command object frame type does not equate one provided by the datagram"""
-    default_message = 'Frame type does not match expected'
+class AccountNotAuthenticatedException(AccountAuthenticationException):
+    extended_description = "account not authenticated"
 
 
-class InvalidDataException(HekrAPIFormattedException):
-    """Base exception class for other data-related exceptions"""
-    default_message = 'Invalid Hekr data dictionary provided'
+class AccountCredentialsException(AccountAuthenticationException):
+    extended_description = "credentials incorrect"
 
 
-class InvalidDataMissingKeyException(InvalidDataException):
-    """Raised when a specific data key is missing from the provided data dictionary"""
-    default_message = "Key `{data_key}` not found in provided data dictionary"
+# ---- Refresh token-related exceptions
+class RefreshTokenException(AccountAuthenticationException):
+    base_description = "Refresh token error on account {}"
 
 
-class InvalidDataLessThanException(InvalidDataException):
-    default_message = "Key `{data_key}` contains value '{value}' that is less than minimum '{value_min}'"
+class RefreshTokenExpiredException(RefreshTokenException):
+    """Raised when refresh token is explicitly required and is expired"""
+    extended_description = "token expired and is impossible to use in authentication"
 
 
-class InvalidDataGreaterThanException(InvalidDataException):
-    default_message = "Key `{data_key}` contains value '{value}' that is greater than maximum '{value_max}'"
+class RefreshTokenMissingException(RefreshTokenException):
+    extended_description = "token missing"
 
 
-class CommandNotFoundException(HekrAPIFormattedException):
-    """Raised when a command was not found by value"""
-    default_message = 'Could not find command'
+# ---- Access token-related exceptions
+class AccessTokenException(AccountAuthenticationException):
+    base_description = "Access token error on account {}"
 
 
-class CommandFailedException(HekrAPIFormattedException):
-    """Raised when command execution response contains an error"""
-    default_message = "Could not execute command '{command}' on '{device.device_id}', reason: {reason}"
+class AccessTokenExpiredException(AccessTokenException):
+    """Raised when access token is explicitly required and is expired"""
+    extended_description = "token expired and is impossible to use in authentication"
 
 
-class HeartbeatFailedException(HekrAPIFormattedException):
-    """Raised when heartbeat command failed to execute"""
-    default_message = "Could not execute heartbeat on '{device.device_id}', response: {response}"
+class AccessTokenMissingException(AccessTokenException):
+    extended_description = "token missing"
 
 
-class AuthenticationFailedException(HekrAPIFormattedException):
-    """Base exception class for other authentication-related exceptions"""
-    default_message = "Authentication failed: {reason}"
+# Connector-related exceptions
+class ConnectorException(HekrAPIException):
+    base_description = "Exception on connector {}"
 
 
-class DeviceProtocolNotSetException(HekrAPIFormattedException):
-    """Raised when device does not have a protocol set after creation"""
-    default_message = "Device does not have a protocol set"
+class ConnectorDeviceException(ConnectorException):
+    base_description = "Exception on connector {} with device"
 
 
-class DeviceConnectionMissingException(HekrAPIFormattedException):
-    """Raised when device call cannot be made due to missing connection parameters"""
-    default_message = 'Cannot make requests to device until connection parameters are provided'
+class ConnectorDeviceCollisionException(ConnectorException):
+    extended_description = "device collision on device ID '{}'"
 
 
-class AccountDevicesUpdateFailedException(HekrAPIFormattedException):
-    """Raised when devices update function encounters a status code other than OK"""
-    default_message = 'Devices update on account failed, reason: {reason}'
+class ConnectorDeviceNotProvidedException(ConnectorException):
+    extended_description = "device ID not found while handling response"
 
 
-class UnauthenticatedRequestException(AuthenticationFailedException):
-    default_message = 'Request authentication failed'
+class ConnectorDeviceNotAttachedException(ConnectorException):
+    extended_description = "device ID '{}' not attached on connector"
 
 
-class AccountUnauthenticatedException(AuthenticationFailedException):
-    """Raised when account is not authenticated during method call that requires authentication"""
-    default_message = 'Account unauthenticated'
+class ConnectorSingleDeviceException(ConnectorException):
+    extended_description = "other device '{}' already attached on connector"
 
 
-class AccessTokenExpiredException(AccountUnauthenticatedException):
-    default_message = 'Refresh token expired (valid for 24 hours)'
+class ConnectorTimeoutException(ConnectorException):
+    extended_description = "timeout while performing operation '{}'"
 
 
-class RefreshTokenExpiredException(AccountUnauthenticatedException):
-    default_message = 'Access token expired (valid for 30 days)'
+class ConnectorOpenAttributeOverrideException(ConnectorException):
+    extended_description = "cannot override attribute '{}' on open connector"
 
 
-class HekrAPIExpectedGotException(HekrAPIException):
-    """Base exception for variable-expected-got exceptions"""
-    default_message = "For variable {variable} expected {expected}, got {got}"
-
-    def __init__(self, variable, got, expected):
-        if not isinstance(expected, (list, tuple)):
-            expected = [expected]
-
-        expected = ', '.join([
-            ('`' + v.__name__ + '`' if isinstance(v, type) else str(v))
-            for v in expected
-        ])
-
-        if not isinstance(got, (list, tuple)):
-            got = [got]
-
-        got = ', '.join([('`' + v.__name__ + '`' if isinstance(v, type) else str(v)) for v in got])
-
-        variable = str(variable)
-        variable = variable if ' ' in variable else '`' + variable + '`'
-
-        super().__init__(self.default_message.format(variable=variable, got=got, expected=expected))
+class ConnectorError(ConnectorException):
+    base_description = "Error on connector {}"
 
 
-class HekrTypeError(HekrAPIExpectedGotException):
-    default_message = 'Type for {variable} is invalid (expected {expected}; got {got})'
+class ConnectorAuthenticationError(ConnectorError):
+    base_description = "authentication invalid"
 
 
-class HekrValueError(HekrAPIExpectedGotException):
-    default_message = 'Value(s) for {variable} is invalid (expected {expected}; got {got})'
+class ConnectorNotConnectedException(ConnectorException):
+    extended_description = "connector not connected"
 
 
-class HekrValueSizeError(HekrAPIExpectedGotException):
-    default_message = 'Value for {variable} is of invalid length (expected {expected}; got {got})'
+class ConnectorCouldNotConnectException(ConnectorNotConnectedException):
+    extended_description = "could not establish connection, reason: {}"
 
 
-class HekrResponseStatusError(HekrAPIExpectedGotException):
-    default_message = 'Response status code for request to {variable} is invalid (expected {expected}; got {got})'
+class ConnectorSendError(ConnectorError):
+    extended_description = "could not sent request payload, reason: {}"
 
 
-class HekrComparisonError(HekrAPIFormattedException, TypeError):
-    default_message = 'Comparing {type(lhs)} and {type(rhs)} is not supported.'
+class ConnectorReadError(ConnectorError):
+    extended_description = "could not receive response payload, reason: {}"
+
+
+# Device-related exceptions
+class DeviceException(HekrAPIException):
+    base_description = "Exception on device {}"
+
+
+class DeviceProtocolNotSetException(DeviceException):
+    """Raised when an operation explicitly requires protocol interaction"""
+    extended_description = "protocol not set"
+
+
+class ConnectorUnexpectedMessageIDException(ConnectorNotConnectedException):
+    """Raised when received message identifier is not expected"""
+    extended_description = "received message ID {} is different from expected {}"
+
+
+# -- Device connectors exceptions
+class DeviceConnectorsException(DeviceException, ConnectorException):
+    base_description = "Exception with connector(s) on device {}"
+
+
+class DeviceConnectorMissingException(DeviceConnectorsException):
+    extended_description = "connector {} is absent from device"
+
+
+class DeviceConnectorsMissingException(DeviceConnectorMissingException):
+    """Raised when an operation explicitly requires at least one existing connector"""
+    extended_description = "no connectors available on device"
+
+
+class DeviceCloudConnectorBoundException(DeviceConnectorsException):
+    """Raised when an attempt to override an existing cloud connector has been made"""
+    extended_description = "cloud connector {} is already bound"
+
+
+class DeviceLocalConnectorBoundException(DeviceConnectorsException):
+    """Raised when an attempt to override an existing local connector has been made"""
+    extended_description = "local connector {} is already bound"
+
+
+class DeviceConnectorsFailedException(DeviceConnectorsException):
+    """Raised when an attempt to communicate with device over connectors was made, but failed"""
+    extended_description = "connectors failed with errors: {}"
+
+
+class DeviceConnectorNotConnectedException(DeviceConnectorsException, ConnectorNotConnectedException):
+    """Raised when an operation explicitly requires an open connector"""
+    extended_description = "connector {} is closed"
+
+
+class DeviceConnectorsNotConnectedException(DeviceConnectorNotConnectedException):
+    """Raised when an operation explicitly requires at least one open connector"""
+    extended_description = "all available connectors are closed"
+
+
+# Protocol-related exceptions
+class ProtocolException(HekrAPIException):
+    base_description = "Error with protocol {}"
+
+
+# -- Command-related exceptions
+class CommandException(ProtocolException):
+    base_description = "Error with command {}"
+
+
+# ---- Command data-related exceptions
+class CommandDataException(CommandException, ValueError):
+    """Raised when provided command data contains invalid keys and/or values"""
+    base_description = "Error with data for command {}"
+
+
+class CommandDataExtraException(CommandDataException):
+    extended_description = "extra fields in provided data: {}"
+
+
+class CommandDataOutOfBoundsException(CommandDataException):
+    """Raised when a value for argument is beyond argument min/max thresholds"""
+    extended_description = "value for field {} is out of argument bounds"
+
+
+class CommandDataLessThanException(CommandDataException):
+    """Raised when a value for argument is less than the argument's minimum value"""
+    extended_description = "value for field {} is less than {}"
+
+
+class CommandDataGreaterThanException(CommandDataException):
+    """Raised when a value for argument is greater than the argument's maximum value"""
+    extended_description = "value for field {} is greater than {}"
+
+
+# ---- Missing data exceptions
+class CommandDataMissingException(CommandDataException):
+    extended_description = "missing fields in provided data: {}"
+
+
+class CommandDataUnknownCommandException(CommandDataMissingException):
+    base_description = "Error with data, command unknown"
+    extended_description = "missing fields in provided data: {}"
+
+
+# ---- Raw datagram-specific exceptions
+class CommandDataRawException(CommandDataException):
+    base_description = "Error with raw datagram for command {}"
+
+
+class CommandDataInvalidPrefixException(CommandDataRawException):
+    extended_description = "invalid prefix"
+
+
+class CommandDataInvalidLengthException(CommandDataRawException):
+    extended_description = "length different from expected"
+
+
+class CommandDataInvalidChecksumException(CommandDataRawException):
+    extended_description = "checksum different from expected"
+
+
+class CommandDataInvalidFrameTypeException(CommandDataRawException):
+    extended_description = "frame type different from expected"

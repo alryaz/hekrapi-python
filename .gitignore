@@ -128,5 +128,9 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# VSCode Settings
+# IDE Settings
 .vscode/
+.idea/
+
+# Scraping exclude
+extracted/

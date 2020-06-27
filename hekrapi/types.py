@@ -1,8 +1,11 @@
 """Types for Hekr API project."""
 
-from typing import Tuple, Dict, Any, Union, Optional, Callable, TypeVar, TYPE_CHECKING
+from typing import Tuple, Dict, Any, Union, Optional, Callable, TypeVar, TYPE_CHECKING, Coroutine
 
-from .const import DeviceResponseState
+try:
+    from typing import NoReturn
+except ImportError:
+    NoReturn = None
 
 if TYPE_CHECKING:
     # noinspection PyUnresolvedReferences
@@ -28,7 +31,7 @@ Action = str
 CommandID = int
 CommandName = str
 
-DeviceCallback = Callable[['Response'], Any]
+ResponseCallback = Callable[['Response'], Any]
 
 DeviceInfo = Dict[str, Any]
 

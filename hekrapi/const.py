@@ -1,39 +1,6 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=too-many-locals
-"""Global constants and enums for HekrAPI module"""
-
-from enum import Enum
-
-
-class FrameType(Enum):
-    """Datagram frame types (per Hekr documentation)"""
-    RECEIVE = 0x01
-    SEND = 0x02
-    DEVICE = 0xFE
-    ERROR = 0xFF
-
-
-#: Device response states
-class DeviceResponseState(Enum):
-    """
-    Response state of `make_request`
-
-    Glossary:
-    _Invalid_ responses are of a format that can't be loaded by `process_response` methods.
-    _Unknown_ responses are parsed responses that have no associated command or action.
-    _Successful_ responses are decoded responses that translate into successful request execution.
-    _Failed_ responses are decoded responses that translate into failed (not invalid!) request execution.
-    """
-    INVALID = -1
-    UNKNOWN = 0
-    SUCCESS = 1
-    FAILURE = 2
-
-
-class DeviceConnectionType(Enum):
-    LOCAL = 1
-    CLOUD = 2
-
+"""Global constants for HekrAPI module"""
 
 #: Default application ID used within requests via cloud and local transports
 DEFAULT_APPLICATION_ID = 'hekr_python_connector'

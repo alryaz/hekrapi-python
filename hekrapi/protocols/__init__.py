@@ -1,17 +1,5 @@
 """ Protocols implemented in Python for Hekr API """
-import pkgutil
-
-__all__ = ['PROTOCOLS']
-
-PROTOCOLS = dict()
-DESCRIPTIONS = dict()
-
-# borrowed from https://stackoverflow.com/a/3365846
-for loader, module_name, is_pkg in pkgutil.walk_packages(__path__):
-    __all__.append(module_name)
-    _module = loader.find_module(module_name).load_module(module_name)
-
-    if hasattr(_module, 'PROTOCOL'):
-        globals()[module_name] = _module
-        PROTOCOLS[module_name] = _module.PROTOCOL
-        DESCRIPTIONS[module_name] = getattr(_module, '__doc__', None)
+from os.path import dirname, basename, isfile, join
+import glob
+modules = glob.glob(join(dirname(__file__), "*.py"))
+__all__ = [basename(f)[:-3] for f in modules if isfile(f) is True and not f.endswith('__init__.py')]

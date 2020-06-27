@@ -1,13 +1,8 @@
 # -*- coding: utf-8 -*-
 """Basic protocol definition for ELRO Connects (devices with newer firmware version)"""
-from hekrapi.protocol import Command, Argument
-from hekrapi.protocols.elro_connects import (
-    PROTOCOL as ORIGINAL_PROTOCOL,
-    CMD_EQUIPMENT_CONTROL,
-    CMD_EQUIPMENT_ADD,
-    CMD_EQUIPMENT_REMOVE
-)
-from hekrapi.const import FrameType
+from hekrapi.protocol import Command, Argument, register_supported_protocol
+from hekrapi.development.elro_connects import ELROConnectsProtocol
+from hekrapi.enums import FrameType
 
 
 def convert_new_input(value: int) -> int:
@@ -32,23 +27,24 @@ CONVERT_TO_NEW_VERSION = (convert_new_input, convert_new_output)
 
 ARGUMENT_NEW_EQUIPMENT_ID = Argument("equipment_id", CONVERT_TO_NEW_VERSION, None, "device_ID")
 
-PROTOCOL = ORIGINAL_PROTOCOL.extend(
-    Command(101, FrameType.SEND, CMD_EQUIPMENT_CONTROL, arguments=[
+
+@register_supported_protocol
+class ELROConnectsNewProtocol(ELROConnectsProtocol):
+    equipment_control = Command(101, FrameType.SEND, arguments=[
         ARGUMENT_NEW_EQUIPMENT_ID,
         Argument("state", str, None, "device_status"),
-    ]),
+    ])
     # command 102 ?
-    Command(103, FrameType.SEND, "replace_equipment", arguments=[ARGUMENT_NEW_EQUIPMENT_ID]),
-    Command(104, FrameType.SEND, "equipment_delete", arguments=[ARGUMENT_NEW_EQUIPMENT_ID]),
-    Command(105, FrameType.SEND, "equipment_rename", arguments=[
+    replace_equipment = Command(103, FrameType.SEND, arguments=[ARGUMENT_NEW_EQUIPMENT_ID])
+    equipment_delete = Command(104, FrameType.SEND, arguments=[ARGUMENT_NEW_EQUIPMENT_ID])
+    equipment_rename = Command(105, FrameType.SEND, arguments=[
         ARGUMENT_NEW_EQUIPMENT_ID,
         Argument("name", str, None, "device_name"),
-    ]),
-    Command(106, FrameType.SEND, "choose_scene_group", arguments=[
+    ])
+    choose_scene_group = Command(106, FrameType.SEND, arguments=[
         Argument("group", CONVERT_TO_NEW_VERSION, None, "scene_type"),
-    ]),
-    Command(110, FrameType.SEND, "delete_scene", arguments=[
+    ])
+    delete_scene = Command(110, FrameType.SEND, arguments=[
         Argument("group", int, None, "scene_type", value_default=0),
         Argument("scene_id", CONVERT_TO_NEW_VERSION, None, "scene_ID"),
     ])
-)
