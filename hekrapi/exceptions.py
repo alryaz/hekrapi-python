@@ -18,12 +18,26 @@ class HekrAPIException(BaseException):
 
 # Account-related exception
 class AccountException(HekrAPIException):
-    base_description = "Exception on account {}"
+    base_description = "[Account {}]"
 
 
 # -- Account low level response exceptions
+# ---- Request exceptions
+class AccountRequestException(AccountException):
+    base_description = AccountException.base_description + " [Request]"
+
+
+class AccountConnectionException(AccountRequestException):
+    extended_description = "could not connect (error: {})"
+
+
+class AccountRequestTimeoutException(AccountRequestException):
+    extended_description = "request timed out"
+
+
+# ---- Response exceptions
 class AccountResponseException(AccountException):
-    base_description = "Request exception on account {}"
+    base_description = AccountException.base_description + " [Response]"
 
 
 class AccountUnknownResponseException(AccountResponseException):
@@ -40,7 +54,7 @@ class AccountJSONInvalidException(AccountUnknownResponseException):
 
 # -- Account authentication exceptions
 class AccountAuthenticationException(HekrAPIException):
-    base_description = "Authentication error on account {}"
+    base_description = AccountException.base_description + " [Auth]"
 
 
 class AccountNotAuthenticatedException(AccountAuthenticationException):
@@ -53,7 +67,7 @@ class AccountCredentialsException(AccountAuthenticationException):
 
 # ---- Refresh token-related exceptions
 class RefreshTokenException(AccountAuthenticationException):
-    base_description = "Refresh token error on account {}"
+    base_description = AccountException.base_description + " [RToken]"
 
 
 class RefreshTokenExpiredException(RefreshTokenException):
@@ -67,7 +81,7 @@ class RefreshTokenMissingException(RefreshTokenException):
 
 # ---- Access token-related exceptions
 class AccessTokenException(AccountAuthenticationException):
-    base_description = "Access token error on account {}"
+    base_description = AccountException.base_description + " [AToken]"
 
 
 class AccessTokenExpiredException(AccessTokenException):
@@ -81,15 +95,19 @@ class AccessTokenMissingException(AccessTokenException):
 
 # Connector-related exceptions
 class ConnectorException(HekrAPIException):
-    base_description = "Exception on connector {}"
+    base_description = "[Connector {}]"
+
+
+class ConnectorListenerActive(ConnectorException):
+    extended_description = "listener is already running"
 
 
 class ConnectorDeviceException(ConnectorException):
-    base_description = "Exception on connector {} with device"
+    base_description = ConnectorException.base_description + " [Device]"
 
 
 class ConnectorDeviceCollisionException(ConnectorException):
-    extended_description = "device collision on device ID '{}'"
+    extended_description = "collision on device ID '{}'"
 
 
 class ConnectorDeviceNotProvidedException(ConnectorException):
@@ -113,15 +131,19 @@ class ConnectorOpenAttributeOverrideException(ConnectorException):
 
 
 class ConnectorError(ConnectorException):
-    base_description = "Error on connector {}"
+    base_description = ConnectorException.base_description + " [Error]"
 
 
 class ConnectorAuthenticationError(ConnectorError):
-    base_description = "authentication invalid"
+    base_description = ConnectorException.base_description + " [Error:Auth]"
 
 
 class ConnectorNotConnectedException(ConnectorException):
     extended_description = "connector not connected"
+
+
+class ConnectorNotAuthenticatedException(ConnectorException):
+    extended_description = "connector not authenticated"
 
 
 class ConnectorCouldNotConnectException(ConnectorNotConnectedException):
@@ -132,13 +154,17 @@ class ConnectorSendError(ConnectorError):
     extended_description = "could not sent request payload, reason: {}"
 
 
+class ConnectorClosedError(ConnectorError):
+    extended_description = "connector closed, reason: {}"
+
+
 class ConnectorReadError(ConnectorError):
     extended_description = "could not receive response payload, reason: {}"
 
 
 # Device-related exceptions
 class DeviceException(HekrAPIException):
-    base_description = "Exception on device {}"
+    base_description = "[Device {}]"
 
 
 class DeviceProtocolNotSetException(DeviceException):
@@ -153,7 +179,7 @@ class ConnectorUnexpectedMessageIDException(ConnectorNotConnectedException):
 
 # -- Device connectors exceptions
 class DeviceConnectorsException(DeviceException, ConnectorException):
-    base_description = "Exception with connector(s) on device {}"
+    base_description = DeviceException.base_description + " [Conn]"
 
 
 class DeviceConnectorMissingException(DeviceConnectorsException):
@@ -170,9 +196,9 @@ class DeviceCloudConnectorBoundException(DeviceConnectorsException):
     extended_description = "cloud connector {} is already bound"
 
 
-class DeviceLocalConnectorBoundException(DeviceConnectorsException):
-    """Raised when an attempt to override an existing local connector has been made"""
-    extended_description = "local connector {} is already bound"
+class DeviceDirectConnectorBoundException(DeviceConnectorsException):
+    """Raised when an attempt to override an existing direct connector has been made"""
+    extended_description = "direct connector {} is already bound"
 
 
 class DeviceConnectorsFailedException(DeviceConnectorsException):
@@ -192,18 +218,22 @@ class DeviceConnectorsNotConnectedException(DeviceConnectorNotConnectedException
 
 # Protocol-related exceptions
 class ProtocolException(HekrAPIException):
-    base_description = "Error with protocol {}"
+    base_description = "[Protocol {}]"
+
+
+class ProtocolCommandNotFoundException(ProtocolException):
+    extended_description = "command '{}' not found"
 
 
 # -- Command-related exceptions
 class CommandException(ProtocolException):
-    base_description = "Error with command {}"
+    base_description = "[Command {}]"
 
 
 # ---- Command data-related exceptions
 class CommandDataException(CommandException, ValueError):
     """Raised when provided command data contains invalid keys and/or values"""
-    base_description = "Error with data for command {}"
+    base_description = CommandException.base_description + " [Data]"
 
 
 class CommandDataExtraException(CommandDataException):
@@ -231,13 +261,12 @@ class CommandDataMissingException(CommandDataException):
 
 
 class CommandDataUnknownCommandException(CommandDataMissingException):
-    base_description = "Error with data, command unknown"
-    extended_description = "missing fields in provided data: {}"
+    base_description = "[Command UNKNOWN]"
 
 
 # ---- Raw datagram-specific exceptions
 class CommandDataRawException(CommandDataException):
-    base_description = "Error with raw datagram for command {}"
+    base_description = CommandException.base_description + " [Raw]"
 
 
 class CommandDataInvalidPrefixException(CommandDataRawException):

@@ -20,15 +20,15 @@ import re
 from enum import IntEnum
 from functools import partial
 from json import loads as json_loads
-from typing import TYPE_CHECKING, Union, List, Dict, Optional, Callable, Any, Tuple, NoReturn, Type, Iterable
+from typing import TYPE_CHECKING, Union, List, Dict, Optional, Callable, Any, Tuple, Type, Iterable
 
-from .connector import LocalConnector, CloudConnector
+from .connector import DirectConnector, CloudConnector
 from .const import FRAME_START_IDENTIFICATION
 from .enums import Encoding, FrameType, WorkMode
 from .exceptions import CommandDataMissingException, CommandDataLessThanException, CommandDataGreaterThanException, \
     CommandDataExtraException, CommandDataInvalidPrefixException, CommandDataInvalidLengthException, \
     CommandDataInvalidChecksumException, CommandDataUnknownCommandException, CommandDataInvalidFrameTypeException, \
-    HekrAPIException
+    HekrAPIException, ProtocolCommandNotFoundException
 from .types import CommandData, MessageEncoded, MessageData, RawDataType, JSONDataType, CommandID, AnyCommand
 
 if TYPE_CHECKING:
@@ -332,7 +332,7 @@ class Command:
         return self._arguments
 
     @arguments.setter
-    def arguments(self, value: Optional[Iterable[Argument]]) -> NoReturn:
+    def arguments(self, value: Optional[Iterable[Argument]]) -> None:
         """
         Arguments list setter (updater).
         """
@@ -383,7 +383,7 @@ class Command:
         return self._invoke_command_id
 
     @invoke_command_id.setter
-    def invoke_command_id(self, value: Optional[int]) -> NoReturn:
+    def invoke_command_id(self, value: Optional[int]) -> None:
         if value is not None:
             if self.frame_type in self._frame_type_collisions['_invoke_command_id']:
                 raise ValueError(f"invoke_command_id not allowed with frame type {self.frame_type.name}")
@@ -395,7 +395,7 @@ class Command:
         return self._response_command_id
 
     @response_command_id.setter
-    def response_command_id(self, value: int) -> NoReturn:
+    def response_command_id(self, value: int) -> None:
         if value is not None:
             if self.frame_type in self._frame_type_collisions['_response_command_id']:
                 raise ValueError(f"response_command_id not allowed with frame type {self.frame_type.name}")
@@ -409,7 +409,7 @@ class Command:
                            use_variable_names: bool = False,
                            filter_values: bool = True,
                            ignore_extra: bool = False,
-                           pass_argument: bool = False) -> NoReturn:
+                           pass_argument: bool = False) -> None:
         if data is None:
             data = dict()
 
@@ -694,8 +694,8 @@ class _ProtocolMeta(type):
     """
     # Name pre-generation regular expression
     _name_conversion_regex = re.compile(r'((?<=[a-z])[A-Z]|(?<!\A)[A-Z](?=[a-z]))')
-    _commands_by_id = None
-    _commands_by_name = None
+    _commands_by_id: Dict[int, Command] = NotImplemented
+    _commands_by_name: Dict[str, Command] = None
 
     @staticmethod
     def _get_commands_by_name(source_dict: Dict[str, Any]) -> Dict[str, Command]:
@@ -759,16 +759,16 @@ class _ProtocolMeta(type):
 
             attributes['protocol_name'] = protocol_name
 
-        local_commands: Dict[str, Command] = dict()
+        new_commands: Dict[str, Command] = dict()
         for key, value in attributes.items():
             if isinstance(value, Command):
-                local_commands[key] = value
+                new_commands[key] = value
 
         commands_by_name = dict()
         for base in bases:
             if hasattr(base, '_commands_by_name'):
                 commands_by_name.update(getattr(base, '_commands_by_name'))
-        commands_by_name.update(local_commands)
+        commands_by_name.update(new_commands)
 
         commands_id_collisions: Dict[CommandID, List[Tuple[name, Command]]] = dict()
         for key, command in commands_by_name.items():
@@ -779,9 +779,9 @@ class _ProtocolMeta(type):
         for command_id, commands_list in commands_id_collisions.items():
             last_pair = commands_list[-1]
             if len(commands_list) > 1:
-                print("Duplicate command ID '%d' for protocol %s detected. Encoding/decoding operations"
-                      "for method(s) %s will be handled by '%s'"
-                      % (command_id, name, ', '.join(map("'{0[0]}'".format, commands_list)), last_pair[0]))
+                _LOGGER.warning("Duplicate command ID '%d' for protocol %s detected. Encoding/decoding operations"
+                                "for method(s) %s will be handled by '%s'"
+                                % (command_id, name, ', '.join(map("'{0[0]}'".format, commands_list)), last_pair[0]))
             commands_by_id[command_id] = last_pair[1]
 
         attributes['_commands_by_name'] = commands_by_name
@@ -805,29 +805,8 @@ class _ProtocolMeta(type):
     def __setitem__(cls, key: str, value: Command):
         raise AttributeError('modifying commands is only allowed through inheritance')
 
-    def __setattr__(self, key: str, value: Union[Command, Any]) -> NoReturn:
+    def __setattr__(self, key: str, value: Union[Command, Any]) -> None:
         raise AttributeError('modifying attributes is only allowed through inheritance')
-
-    def encode(cls, command: Union[int, str], data: Optional[CommandData] = None, *args, **kwargs) -> MessageData:
-        """
-        Encode message using given arguments.
-        :param command: Command ID / Name (must exist within the protocol)
-        :param data: Input dictionary of data to encode
-        :param args: Additional positional arguments to the encoder
-        :param kwargs: Additional keyword arguments to the encoder
-        :return: Dictionary with message parameters
-        """
-        raise NotImplementedError
-
-    def decode(cls, data: MessageData, *args, **kwargs) -> Tuple[Command, Dict[str, Any], Optional[int]]:
-        """
-        Decode message using given arguments.
-        :param data: Input data
-        :param args: Additional positional arguments to the decoder
-        :param kwargs: Additional keyword arguments to the decoder
-        :return: Dictionary of data decoded from response
-        """
-        raise NotImplementedError
 
 
 class Protocol(metaclass=_ProtocolMeta):
@@ -835,26 +814,45 @@ class Protocol(metaclass=_ProtocolMeta):
     # Protocol name (will be auto-generated upon class initialization)
     protocol_name: Optional[str] = None
 
-    # Default local encoding type
-    default_local_encoding_type: Encoding = NotImplemented
+    # Default direct encoding type
+    default_direct_encoding_type: Encoding = NotImplemented
 
     # Default cloud encoding type
     default_cloud_encoding_type: Encoding = NotImplemented
 
     # Default local port for local connections
-    default_local_port: int = NotImplemented
+    default_direct_port: int = NotImplemented
 
     # Use said local connector class when instantiating connections
-    default_local_connector_class: Type[LocalConnector] = LocalConnector
+    default_direct_connector_class: Type[DirectConnector] = DirectConnector
 
     # Use said cloud connector class when instantiating connections
     default_cloud_connector_class: Type[CloudConnector] = CloudConnector
+
+    @classmethod
+    def get_command(cls, command: AnyCommand):
+        """
+        Get command by ID / name.
+        Passing command object is possible; getter verifies whether the command belongs to the protocol.
+        :param command:
+        :return:
+        """
+        try:
+            if isinstance(command, Command) and command in cls._commands_by_name.values():
+                return command
+            if isinstance(command, int):
+                return cls._commands_by_id[command]
+            if isinstance(command, str):
+                return cls._commands_by_name[command]
+        except LookupError:
+            pass
+        raise ProtocolCommandNotFoundException(cls, command)
 
     @staticmethod
     def _device_compatibility_checker(device: 'Device') -> bool:
         """
         Optional device compatibility checker (used in auto-detection)
-        :param device: Device
+        :param device: Device to check compatibility against
         :return: Whether device is compatible
         """
         return NotImplemented
@@ -863,45 +861,64 @@ class Protocol(metaclass=_ProtocolMeta):
     def _device_info_compatibility_checker(device_info: 'DeviceInfo') -> bool:
         """
         Optional device info compatibility checker (used in auto-detection)
-        :param device_info: Device info
+        :param device_info: Device info to check compatibility against
         :return: Whether device info is compatible
         """
         return NotImplemented
+
+    _compatibility_checker_ignored_exceptions = (
+        AttributeError, ValueError, LookupError,
+        TypeError, HekrAPIException
+    )
 
     @classmethod
     def is_device_compatible(cls, device: 'Device') -> bool:
         """
         Check whether passed device is compatible with given protocol.
+
+        Should the protocol not implement device checker, device info will be attempted
+        to be checked should it be present on the device.
+
         :param device: Device to check compatibility against
-        :return: Compatibility result
+        :return: Compatibility check result
         """
         try:
             result = cls._device_compatibility_checker(device)
             if result is NotImplemented and device.device_info is not None:
-                return cls._device_info_compatibility_checker(device.device_info)
+                result = cls.is_device_info_compatible(device.device_info)
+            return result
 
-        except (AttributeError, ValueError, IndexError, KeyError, HekrAPIException):
-            _LOGGER.exception('Exception raised while checking device info for compatibility')
+        except cls._compatibility_checker_ignored_exceptions as e:
+            _LOGGER.debug("Ignored device info compatibility exception: %s" % e)
             return False
-        return False
 
     @classmethod
     def is_device_info_compatible(cls, device_info: 'DeviceInfo'):
-        if cls._device_info_compatibility_checker:
-            try:
-                return cls._device_info_compatibility_checker(device_info)
+        """
+        Check whether passed device info is compatible with given protocol.
 
-            except (AttributeError, ValueError, IndexError, KeyError, HekrAPIException):
-                _LOGGER.exception('Exception raised while checking device info for compatibility')
-                return False
+        :param device_info: Device to check compatibility against
+        :return: Compatibility check result
+        """
+        try:
+            return cls._device_info_compatibility_checker(device_info) is True
 
-        return False
+        except cls._compatibility_checker_ignored_exceptions as e:
+            _LOGGER.debug("Ignored device info compatibility exception: %s" % e)
+            return False
 
     @classmethod
-    def create_local_connector(cls, host: str, port: Optional[int] = None, **kwargs):
+    def create_direct_connector(cls, host: str, port: Optional[int] = None, **kwargs):
+        """
+        Create direct connector using default direct connector class pointing to host.
+        :param host: Host to point direct connector at.
+        :param port:
+        :param kwargs:
+        :return:
+        """
         if port is None:
-            port = cls.default_local_port
-        return cls.default_local_connector_class(host, port=port, **kwargs)
+            port = cls.default_direct_port
+        return cls.default_direct_connector_class(host, port=port, **kwargs)
 
     @classmethod
     def create_cloud_connector(cls, *args, **kwargs):
@@ -951,14 +968,14 @@ class Protocol(metaclass=_ProtocolMeta):
         return encoded_data
 
     @classmethod
-    def encode_local(cls,
-                     command: AnyCommand,
-                     data: Optional[CommandData] = None,
-                     use_variable_names: bool = False,
-                     filter_values: bool = True,
-                     frame_number: Optional[int] = None):
-        """Shortcut method for local encoding"""
-        return cls.encode(cls.default_local_encoding_type,
+    def encode_direct(cls,
+                      command: AnyCommand,
+                      data: Optional[CommandData] = None,
+                      use_variable_names: bool = False,
+                      filter_values: bool = True,
+                      frame_number: Optional[int] = None):
+        """Shortcut method for direct encoding"""
+        return cls.encode(cls.default_direct_encoding_type,
                           command, data, use_variable_names,
                           filter_values, frame_number)
 

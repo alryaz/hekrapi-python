@@ -48,16 +48,16 @@ class SwitchState(IntEnum):
 @register_supported_protocol
 class PowerMeterProtocol(Protocol):
     protocol_id = "power_meter"
-    default_local_port = 10000
-    default_cloud_encoding_type = Encoding.JSON & Encoding.RAW
-    default_local_encoding_type = Encoding.RAW
+    default_direct_port = 10000
+    default_cloud_encoding_type = Encoding.RAW
+    default_direct_encoding_type = Encoding.RAW
 
-    @staticmethod
-    def _device_info_compatibility_checker(device_info: 'DeviceInfo') -> bool:
-        return device_info.name == 'Smart Meter'
+    @classmethod
+    def _device_info_compatibility_checker(cls, device_info: 'DeviceInfo') -> bool:
+        return device_info.product_name == 'Smart Meter'
 
     # Power meter commands
-    query_general = Command(0, FrameType.SEND, response_command_id=1, description='Query device state in general')
+    query_device = Command(0, FrameType.SEND, response_command_id=1, description='Query device state in general')
     report_device = Command(1, FrameType.RECEIVE, arguments=[
         Argument("phase_count", int, 1, "type"),
         Argument("switch_state", TO_BOOL, 1, "sw"),

@@ -1,17 +1,14 @@
 """Types for Hekr API project."""
 
-from typing import Tuple, Dict, Any, Union, Optional, Callable, TypeVar, TYPE_CHECKING, Coroutine
-
-try:
-    from typing import NoReturn
-except ImportError:
-    NoReturn = None
+from typing import Dict, Any, Union, Optional, Callable, TypeVar, TYPE_CHECKING, Awaitable
 
 if TYPE_CHECKING:
     # noinspection PyUnresolvedReferences
-    from .device import Device, Response
+    from .device import Device
     # noinspection PyUnresolvedReferences
     from .protocol import Command
+    # noinspection PyUnresolvedReferences
+    from .connector import BaseConnector, Response
 
 # Raw datagram type
 RawDataType = Union[str, bytes, bytearray]
@@ -37,3 +34,4 @@ DeviceInfo = Dict[str, Any]
 
 # Helper types
 AnyCommand = Union[CommandID, CommandName, 'Command']
+ListenerErrorCallback = Callable[['_BaseConnector', BaseException], Union[bool, Awaitable[bool]]]

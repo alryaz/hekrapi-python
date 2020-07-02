@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from distutils.core import setup
 
-version = 'v0.3.0'
+version = 'v0.3.0-rc1'
 setup(
     name='hekrapi',
     packages=['hekrapi', 'hekrapi.protocols'],
@@ -15,6 +15,7 @@ setup(
     keywords=['Hekr', 'API', 'Wisen', 'Smart Devices', 'IoT'],
     install_requires=[
         'aiohttp',
+        'aiounittest~=1.4.0',
     ],
     classifiers=[
         'Development Status :: 3 - Alpha',

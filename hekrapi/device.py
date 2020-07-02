@@ -7,44 +7,67 @@ __all__ = [
 ]
 import asyncio
 import logging
-from enum import Enum
 from functools import partial
 from types import MappingProxyType
 from typing import Optional, Any, TYPE_CHECKING, Dict, Callable, List, Union, Iterable, \
-    Mapping, Type, Tuple
+    Mapping, Type, Sequence, Generator
 
-from .connector import LocalConnector, CloudConnector
-from .const import ACTION_HEARTBEAT_REQUEST, ACTION_COMMAND_REQUEST
-from .enums import DeviceType, WorkMode
-from .exceptions import DeviceProtocolNotSetException, DeviceLocalConnectorBoundException, \
-    DeviceCloudConnectorBoundException, DeviceConnectorsMissingException, DeviceConnectorsNotConnectedException, \
-    DeviceConnectorNotConnectedException, ConnectorUnexpectedMessageIDException, \
+from hekrapi.connector import BaseCloudConnector, BaseDirectConnector
+from hekrapi.const import ACTION_HEARTBEAT_REQUEST, ACTION_COMMAND_REQUEST
+from hekrapi.enums import DeviceType, WorkMode
+from hekrapi.exceptions import DeviceProtocolNotSetException, DeviceConnectorsMissingException, \
+    DeviceConnectorsNotConnectedException, \
     DeviceConnectorMissingException
-from .helpers import sensitive_info_filter
-from .protocol import Protocol
-from .types import MessageID, Action, ResponseCallback, \
-    AnyCommand, CommandData, DeviceID, CommandID
-
-try:
-    from typing import NoReturn
-except ImportError:
-    NoReturn = None
+from hekrapi.helpers import create_callback_task
+from hekrapi.protocol import Protocol
+from hekrapi.types import MessageID, Action, ResponseCallback, \
+    AnyCommand, CommandData, DeviceID, CommandID, DeviceInfo
 
 if TYPE_CHECKING:
-    from .protocol import Command
-    from .connector import _BaseConnector, Response
+    from hekrapi.protocol import Command
+    from hekrapi.connector import BaseConnector, Response
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class DeviceInfo:
-    class DeviceInfoProperty(property):
-        pass
+class ConnectorManager(Sequence):
+    def __init__(self, device: 'Device', connectors: Optional[Sequence['BaseConnector']] = None):
+        self._device = device
+        self._connectors: List['BaseConnector'] = list() if connectors is None else list(connectors)
 
-    def __init__(self, device_info_source: Mapping[str, Any], check_source: bool = True):
-        self._device_info_source = device_info_source
+    def __len__(self) -> int:
+        return self._connectors.__len__()
+
+    def __getitem__(self, item: Union[int, slice]):
+        return self._connectors.__getitem__(item)
+
+    def __iter__(self):
+        return self._connectors.__iter__()
+
+    def filtered(self, connected: Optional[bool] = None,
+                 authenticated: Optional[bool] = None) -> Generator['BaseConnector', Any, None]:
+        for connector in self._connectors:
+            if not (connected is None or connector.is_connected is connected):
+                continue
+            if not (authenticated is None or connector.is_authenticated is authenticated):
+                continue
+            yield connector
+
+    def first_connected(self, connected: bool = True) -> Optional['BaseConnector']:
+        for connector in self.filtered(connected=connected):
+            return connector
+
+    def first_authenticated(self, authenticated: bool = True) -> Optional['BaseConnector']:
+        for connector in self.filtered(connected=authenticated):
+            return connector
+
+
+class DeviceInfo(dict):
+    def __init__(self, device_info_source: Mapping[str, Any], check_source: bool = False, **kwargs):
+        """Device info initializer"""
         if check_source:
-            self.check_device_info_dict(device_info_source, raise_for_error=True)
+            self.validate_source_dictionary(device_info_source)
+        super().__init__(device_info_source, **kwargs)
 
     def __str__(self):
         return '{}({})'.format(
@@ -53,114 +76,128 @@ class DeviceInfo:
         )
 
     def __repr__(self):
-        return '<Hekr:{}[device_id={}, device_type={}, lan_address={}, wan_address={}]>'.format(
+        return '<Hekr:{}[device_id={}, device_type={}]>'.format(
             self.__class__.__name__,
             self.device_id,
             self.device_type.name,
-            self.lan_address,
-            self.wan_address,
         )
 
     @classmethod
-    def check_device_info_dict(cls,
-                               device_info_dict: Mapping[str, Any],
-                               raise_for_error: bool = False) -> List[Tuple[str, str]]:
-        temp_object = cls(device_info_dict, check_source=False)
-        invalid_properties = []
-
-        for attribute, obj in cls.__dict__.items():
-            if isinstance(obj, cls.DeviceInfoProperty):
+    def validate_source_dictionary(cls, device_info_source: Mapping[str, Any], raise_for_error: bool = False) -> bool:
+        for key, value in cls.__dict__.items():
+            if isinstance(value, property):
                 try:
-                    obj.fget(temp_object)
-                except (KeyError, IndexError) as e:
-                    invalid_properties.append((attribute, e.args[0]))
+                    print(key, value.__get__(device_info_source))
+                except (IndexError, KeyError, AttributeError):
+                    if raise_for_error:
+                        return False
+                    raise
+        return True
 
-        if raise_for_error and invalid_properties:
-            raise ValueError('incomplete device info dictionary (missing keys: %s)'
-                             % (', '.join(map(lambda x: x[1], invalid_properties))))
-        return invalid_properties
+    def detect_protocol(self, protocols: Sequence['Protocol']) -> Optional['Protocol']:
+        """
+        Check whether device info is compatible with any protocol within the list, and return the protocol if true.
+        :param protocols: Iterable object of protocols (classes)
+        :return: Protocol class, if found
+        """
+        for protocol in protocols:
+            if protocol.is_device_info_compatible(self):
+                return protocol
 
     @property
-    def device_info_source(self) -> Mapping[str, Any]:
-        device_info_source = self._device_info_source
-        return device_info_source if isinstance(device_info_source, MappingProxyType) \
-            else MappingProxyType(device_info_source)
-
-    @DeviceInfoProperty
     def device_type(self) -> DeviceType:
-        return DeviceType(self._device_info_source['devType'])
+        """Device type getter"""
+        return DeviceType(self['devType'])
 
-    @DeviceInfoProperty
+    @property
     def work_mode(self) -> WorkMode:
-        return WorkMode(self._device_info_source['workModeType'])
+        """Device work mode getter"""
+        return WorkMode(self['workModeType'])
 
-    @DeviceInfoProperty
+    @property
     def device_id(self) -> str:
-        return self._device_info_source['devTid']
+        """Device ID getter"""
+        return self['devTid']
 
-    @DeviceInfoProperty
+    @property
     def product_id(self) -> str:
-        return self._device_info_source['mid']
+        """Product ID getter"""
+        return self['mid']
 
-    @DeviceInfoProperty
+    @property
     def control_key(self) -> str:
-        return self._device_info_source['ctrlKey']
+        """Control key getter"""
+        return self['ctrlKey']
 
-    @DeviceInfoProperty
+    @property
     def product_name(self) -> str:
-        return self._device_info_source['productName']['en_US']
+        """Product name getter"""
+        return self['productName']['en_US']
 
-    @DeviceInfoProperty
+    @property
     def category_name(self) -> str:
-        return self._device_info_source['categoryName']['en_US']
+        """Product category name getter"""
+        return self['categoryName']['en_US']
 
-    @DeviceInfoProperty
+    @property
     def sdk_version(self) -> str:
-        return self._device_info_source['sdkVer']
+        """Firmware SDK version getter"""
+        return self['sdkVer']
 
-    @DeviceInfoProperty
+    @property
     def firmware_version(self) -> str:
-        return self._device_info_source['binVersion']
+        """Firmware build version getter"""
+        return self['binVersion']
 
-    @DeviceInfoProperty
+    @property
     def url_logo(self) -> str:
-        return self._device_info_source['logo']
+        """Device icon/logo URL getter"""
+        return self['logo']
 
-    @DeviceInfoProperty
-    def mac_address(self) -> str:
-        return self._device_info_source['mac']
+    @property
+    def mac_address(self) -> Optional[str]:
+        """Device MAC-address getter"""
+        return self.get('mac')
 
-    @DeviceInfoProperty
-    def lan_address(self) -> str:
-        return self._device_info_source['lanIp']
+    @property
+    def lan_address(self) -> Optional[str]:
+        """Device LAN IP address getter"""
+        return self.get('lanIp')
 
-    @DeviceInfoProperty
+    @property
     def wan_address(self) -> Optional[str]:
-        return self._device_info_source['gis'].get('ip', {}).get('ip')
+        """Device WAN IP address getter"""
+        return self.get('gis', {}).get('ip', {}).get('ip')
 
-    @DeviceInfoProperty
+    @property
     def is_online(self) -> bool:
-        return self._device_info_source['online']
+        """Online status getter"""
+        return self.get('online', False)
 
-    @DeviceInfoProperty
+    @property
     def rssi(self) -> Optional[int]:
-        return self._device_info_source.get('rssi')
+        """Wireless connection strength getter"""
+        return self.get('rssi')
 
-    @DeviceInfoProperty
-    def bind_key(self) -> str:
-        return self._device_info_source['bindKey']
+    @property
+    def bind_key(self) -> Optional[str]:
+        """Bind key getter"""
+        return self.get('bindKey')
 
-    @DeviceInfoProperty
-    def device_name(self):
-        return self._device_info_source['deviceName']
+    @property
+    def device_name(self) -> str:
+        """Device name getter"""
+        return self['deviceName']
 
-    @DeviceInfoProperty
-    def name(self):
-        return self._device_info_source['name']
+    @property
+    def name(self) -> str:
+        """User-assigned device name getter"""
+        return self['name']
 
-    @DeviceInfoProperty
-    def cloud_connect_host(self):
-        return self._device_info_source['dcInfo']['connectHost']
+    @property
+    def cloud_connect_host(self) -> Optional[str]:
+        """Cloud connection host getter"""
+        return self.get('dcInfo', {}).get('connectHost')
 
 
 class Device:
@@ -169,37 +206,23 @@ class Device:
     def __init__(self,
                  device_id: Union[DeviceID, DeviceInfo],
                  control_key: Optional[str] = None,
-                 protocol: Optional[Union[Type['Protocol'], Iterable[Type['Protocol']]]] = None,
-                 device_info: Optional[DeviceInfo] = None,
-                 local_connector: Optional['LocalConnector'] = None,
-                 cloud_connector: Optional['CloudConnector'] = None,
-                 automatic_authentication: bool = True):
-        # generic attributes
+                 protocol: Optional[Type['Protocol']] = None):
+        device_info = None
         if isinstance(device_id, DeviceInfo):
-            if not (device_info is None or device_info == device_id):
-                raise ValueError('differing device info provided for first device_id argument and device_info argument')
             device_info = device_id
             device_id = device_info.device_id
+            if control_key is None:
+                control_key = device_info.control_key
 
         self._device_id: DeviceID = device_id
-        self._control_key: Optional[str] = control_key
         self._device_info: Optional[DeviceInfo] = device_info
-        self._local_connector: Optional[LocalConnector] = local_connector
-        self._cloud_connector: Optional['CloudConnector'] = cloud_connector
+        self._control_key: Optional[str] = control_key
         self._callbacks: Dict[Optional[int], List[ResponseCallback]] = dict()
         self._last_frame_number = 0
+        self._direct_connector = None
+        self._cloud_connector = None
 
-        self.automatic_authentication = automatic_authentication
-
-        if device_info:
-            self.device_info = device_info
-
-        if not (protocol is None or issubclass(protocol, Protocol)):
-            protocol = self.detect_device_protocol(protocol, set_protocol=False)
-            if protocol is None:
-                raise ValueError('device could not detect protocol from provided set of protocols')
-
-        self._protocol: Optional[Type['Protocol']] = protocol
+        self._protocol = protocol
 
     def __str__(self) -> str:
         """
@@ -214,11 +237,11 @@ class Device:
         Generates debug string representation of the device
         :return: String representation (python-like)
         """
-        return '<{} [device_id={}, protocol={}, local_connector={}, cloud_connector={}]>'.format(
+        return '<{} [device_id={}, protocol={}, direct_connector={}, cloud_connector={}]>'.format(
             self.__class__.__name__,
             self.device_id,
             self.protocol,
-            self._local_connector,
+            self._direct_connector,
             self._cloud_connector
         )
 
@@ -229,6 +252,32 @@ class Device:
         """
         return hash(self.device_id)
 
+    # connector management
+    @property
+    def direct_connector(self) -> Optional['BaseDirectConnector']:
+        return self._direct_connector
+
+    @direct_connector.setter
+    def direct_connector(self, value: Optional['BaseDirectConnector']):
+        if not isinstance(value, BaseDirectConnector):
+            raise ValueError("connector '%s' does not inherit from '%s'" % (value, BaseDirectConnector.__name__))
+        value.attach_device(self, set_device_connector=False)
+        self._direct_connector = value
+
+    @property
+    def cloud_connector(self) -> Optional['BaseCloudConnector']:
+        return self._cloud_connector
+
+    @cloud_connector.setter
+    def cloud_connector(self, value: Optional['BaseCloudConnector']):
+        if value is None:
+            if self._cloud_connector is not None:
+                self._cloud_connector.detach_device(self, unset_device_connector=False)
+        if not isinstance(value, BaseCloudConnector):
+            raise ValueError("connector '%s' does not inherit from '%s'" % (value, BaseCloudConnector.__name__))
+        value.attach_device(self, set_device_connector=False)
+        self._cloud_connector = value
+
     # protocol management
     @property
     def protocol(self) -> Optional[Type['Protocol']]:
@@ -236,10 +285,10 @@ class Device:
         return self._protocol
 
     @protocol.setter
-    def protocol(self, value: Type['Protocol']) -> NoReturn:
+    def protocol(self, value: Type['Protocol']) -> None:
         """Device protocol setter"""
         for conn_type, current, from_protocol in [
-            ('local', self._local_connector, value.default_local_connector_class),
+            ('local', self._direct_connector, value.default_direct_connector_class),
             ('cloud', self._cloud_connector, value.default_cloud_connector_class),
         ]:
             if not (current is None or isinstance(current, from_protocol)):
@@ -259,11 +308,13 @@ class Device:
         :param set_protocol: (optional) Set protocol to device upon detection (default: true)
         :return: Protocol class, if found
         """
-        for protocol in protocols:
-            if protocol.is_device_compatible(self):
+        d_i = self._device_info
+        for p in protocols:
+            if p.is_device_compatible(self) or d_i is not None and p.is_device_info_compatible(d_i):
                 if set_protocol:
-                    self.protocol = protocol
-                return protocol
+                    self.protocol = p
+                return p
+            _LOGGER.debug("Device %s incompatible with protocol %s" % (self, p))
         return None
 
     # built-in properties
@@ -287,7 +338,7 @@ class Device:
         return self._control_key
 
     @control_key.setter
-    def control_key(self, value: str) -> NoReturn:
+    def control_key(self, value: str) -> None:
         """
         Control key setter.
         :param value:
@@ -304,14 +355,14 @@ class Device:
         """
         return MappingProxyType(self._callbacks)
 
-    async def run_callbacks(self, response: 'Response') -> NoReturn:
+    async def run_callbacks(self, response: 'Response', executor: Any = None) -> None:
         """
         Run callbacks bound to device.
+        :param executor: (optional) Run synchronous callbacks in specified executor
         :param response: Response object
         """
         # Coroutine-related variables
         callback_coroutines = []
-        loop: Optional[asyncio.AbstractEventLoop] = None
 
         # Collect sections for callbacks
         handle_sections = [None]
@@ -321,19 +372,16 @@ class Device:
         # Handle all-callback coroutines
         for section in handle_sections:
             if section in self._callbacks and self._callbacks[section]:
-                if loop is None:
-                    loop = asyncio.get_running_loop()
                 for callback in self._callbacks[section]:
-                    if asyncio.iscoroutinefunction(callback):
-                        callback_coroutine = callback(response)
-
-                    else:
-                        callback_coroutine = loop.run_in_executor(None, callback, response)
-
-                    callback_coroutines.append(callback_coroutine)
+                    callback_coroutines.append(create_callback_task(
+                        callback, self, response,
+                        executor=executor,
+                        logger=_LOGGER,
+                        suppress_exceptions=True,
+                    ))
 
         if callback_coroutines:
-            loop.create_task(asyncio.wait(callback_coroutines))
+            await asyncio.wait(callback_coroutines, return_when=asyncio.ALL_COMPLETED)
 
     def _get_callback_category(self, command: Optional[AnyCommand] = None):
         if command is None or isinstance(command, int):
@@ -345,7 +393,7 @@ class Device:
 
         return self.protocol[command].command_id
 
-    def callback_add(self, callback: ResponseCallback, command: Optional[AnyCommand] = None) -> Callable[[], NoReturn]:
+    def callback_add(self, callback: ResponseCallback, command: Optional[AnyCommand] = None) -> Callable[[], None]:
         """
         Add callback to device communication flow.
 
@@ -353,7 +401,7 @@ class Device:
 
         :param callback: Callback (coroutine) function
         :param command: (optional) Command to attach callback to
-        :return: Remove added callback fro callbacks
+        :return: Caller for removing added callback from callbacks
         """
         command_id = self._get_callback_category(command)
         callbacks = self._callbacks.setdefault(command_id, [])
@@ -363,7 +411,7 @@ class Device:
 
         return partial(self.callback_remove, callback, command_id)
 
-    def callback_remove(self, callback: ResponseCallback, command: Optional[AnyCommand] = None) -> NoReturn:
+    def callback_remove(self, callback: ResponseCallback, command: Optional[AnyCommand] = None) -> None:
         """
         Remove callback
         :param callback: Callback (coroutine) function
@@ -376,73 +424,6 @@ class Device:
 
         if not self._callbacks[command_id]:
             del self._callbacks[command_id]
-
-    # connector management
-    def _attach_connector(self, conn_type: str, value: '_BaseConnector') -> NoReturn:
-        target_attr = '_%s_connector' % conn_type
-        current_connector = getattr(self, target_attr, None)
-        if not (current_connector is None or current_connector == value):
-            raise ValueError(conn_type + ' connector already exists on device')
-
-        if value is not None:
-            protocol = self.protocol
-            if protocol is not None:
-                protocol_class = protocol.default_local_connector_class
-                if not isinstance(value, protocol_class):
-                    _LOGGER.warning(
-                        'New %s protocol class (%s) is not equal to, or not inherited from the default '
-                        '%s connector class (%s) from device (%s) protocol (%s). This may cause communication '
-                        'issues.' % (conn_type, value.__class__, conn_type, protocol_class, self, protocol)
-                    )
-            value.attach_device(self)
-
-        setattr(self, target_attr, value)
-
-    @property
-    def local_connector(self) -> Optional['LocalConnector']:
-        """Local connector getter"""
-        return self._local_connector
-
-    @local_connector.setter
-    def local_connector(self, value: 'LocalConnector') -> NoReturn:
-        """Local connector setter"""
-        self._attach_connector('local', value)
-
-    @property
-    def cloud_connector(self) -> Optional['CloudConnector']:
-        """Cloud connector accessor"""
-        return self._cloud_connector
-
-    @cloud_connector.setter
-    def cloud_connector(self, value: 'CloudConnector') -> NoReturn:
-        """Cloud connector setter"""
-        self._attach_connector('cloud', value)
-
-    def create_local_connector(self, *args, connector_class: Optional[Type['LocalConnector']] = None, **kwargs):
-        if self._local_connector is not None:
-            raise DeviceLocalConnectorBoundException(self, self._local_connector)
-
-        local_connector = (
-            LocalConnector(*args, **kwargs) if self.protocol is None
-            else self.protocol.create_local_connector(*args, **kwargs)
-        ) if connector_class is None else connector_class(*args, **kwargs)
-
-        local_connector.attach_device(self)
-        self._local_connector = local_connector
-        return local_connector
-
-    def create_cloud_connector(self, *args, connector_class: Optional[Type['CloudConnector']] = None, **kwargs):
-        if self._cloud_connector:
-            raise DeviceCloudConnectorBoundException(self, self._cloud_connector)
-
-        cloud_connector = (
-            CloudConnector(*args, **kwargs) if self.protocol is None
-            else self.protocol.create_cloud_connector(*args, **kwargs)
-        ) if connector_class is None else connector_class(*args, **kwargs)
-
-        cloud_connector.attach_device(self)
-        self._cloud_connector = cloud_connector
-        return cloud_connector
 
     # request management
     async def make_request(self,
@@ -459,7 +440,7 @@ class Device:
         :param with_read:
         :return: Message ID
         """
-        connectors = [self._local_connector, self._cloud_connector]
+        connectors = [self._direct_connector, self._cloud_connector]
 
         if not any(connectors):
             raise DeviceConnectorsMissingException(self)
@@ -481,12 +462,11 @@ class Device:
         """
         return await self.make_request(ACTION_HEARTBEAT_REQUEST)
 
-    async def get_local_response(self, message_id: Optional[MessageID] = None) -> 'Response':
-        local_connector = self._local_connector
-        if local_connector is None:
-            raise DeviceConnectorMissingException(self, 'local')
+    async def get_direct_response(self, message_id: Optional[MessageID] = None) -> 'Response':
+        if self._direct_connector is None:
+            raise DeviceConnectorMissingException(self, 'direct')
 
-        return await self._local_connector.get_response(message_id=message_id)
+        return await self._direct_connector.get_response(message_id=message_id)
 
     async def get_cloud_response(self, message_id: Optional[MessageID] = None) -> 'Response':
         """
@@ -498,43 +478,42 @@ class Device:
         if cloud_connector is None:
             raise DeviceConnectorMissingException(self, 'cloud')
 
-        return await self._get_response(cloud_connector, message_id=message_id)
+        return await self._cloud_connector.get_response(message_id=message_id)
 
     # shorthand request commands
     async def command(self,
                       command: AnyCommand,
-                      data: CommandData = None,
+                      arguments: CommandData = None,
                       frame_number: int = None,
                       with_read: bool = False) -> Union[MessageID, 'Response']:
         """
         Execute device command.
         :param command: Command ID/name/object
-        :param data: (optional) Data values for datagram
+        :param arguments: (optional) Data values for datagram
         :param frame_number: (optional) Frame number
         :param with_read: (optional; default to false) Whether to read response immediately after executing
         :return: Message ID
         """
-        connectors = [self._local_connector, self._cloud_connector]
+        connectors = [self._direct_connector, self._cloud_connector]
 
         if not any(connectors):
             raise DeviceConnectorsMissingException(self)
 
         for connector in connectors:
             if connector is not None and connector.is_connected:
-                encoder = self.protocol.encode_cloud if isinstance(connector, CloudConnector) \
-                    else self.protocol.encode_local
+                if isinstance(connector, BaseCloudConnector):
+                    data = self.protocol.encode_cloud(command, data=arguments, frame_number=frame_number)
+                else:
+                    data = self.protocol.encode_direct(command, data=arguments, frame_number=frame_number)
+
                 return await connector.make_request(
                     ACTION_COMMAND_REQUEST,
-                    params={
-                        "data": encoder(command, data=data, frame_number=frame_number)
-                    },
+                    params={"data": data},
                     with_read=with_read,
                     hekr_device=self
                 )
 
         raise DeviceConnectorsNotConnectedException(self)
-
-        return await self.make_request(ACTION_COMMAND_REQUEST, {"data": encoded_data}, with_read=with_read)
 
     # device info-related accessors
     @property
@@ -546,7 +525,7 @@ class Device:
         return self._device_info
 
     @device_info.setter
-    def device_info(self, new_info: DeviceInfo, update_control_key: bool = True) -> NoReturn:
+    def device_info(self, new_info: DeviceInfo, update_control_key: bool = True) -> None:
         """
         Update device info with provided values
         :param new_info: Device info

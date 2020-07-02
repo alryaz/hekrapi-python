@@ -2,22 +2,18 @@
 """Account class module for HekrAPI"""
 __all__ = ['Account']
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from functools import partialmethod
 from json import JSONDecodeError, loads
-from typing import Dict, Optional, Tuple, Iterable, TYPE_CHECKING, List, Union, Any, Sequence, BinaryIO
+from typing import Dict, Optional, Tuple, Iterable, TYPE_CHECKING, List, Union, Any, Sequence, BinaryIO, Type
 
 from .exceptions import AccessTokenMissingException, AccessTokenExpiredException, AccountCredentialsException, \
     AccountUnknownResponseException, AccountJSONInvalidException, AccountErrorResponseException, \
-    AccountNotAuthenticatedException
+    AccountNotAuthenticatedException, AccountConnectionException, AccountRequestTimeoutException
 
-try:
-    from typing import NoReturn
-except ImportError:
-    NoReturn = None
-
-from aiohttp import ClientSession
+from aiohttp import ClientSession, client_exceptions, ClientTimeout
 
 from .const import DEFAULT_APPLICATION_ID, DEFAULT_APPLICATION_NAME, DEFAULT_APPLICATION_VERSION, \
     DEFAULT_APPLICATION_TYPE, DEFAULT_OS_VERSION, DEFAULT_TIMEOUT
@@ -57,7 +53,7 @@ class Account:
                  access_token: Optional[str] = None,
                  refresh_token: Optional[str] = None,
                  reauthenticate_on_fail: bool = True,
-                 default_timeout: int = DEFAULT_TIMEOUT,
+                 timeout: Union[int, float, 'timedelta', ClientTimeout] = DEFAULT_TIMEOUT,
                  application_id: str = DEFAULT_APPLICATION_ID,
                  application_name: str = DEFAULT_APPLICATION_NAME,
                  application_version: str = DEFAULT_APPLICATION_VERSION,
@@ -87,12 +83,17 @@ class Account:
         else:
             self._access_token = None
 
+        if isinstance(timeout, (int, float)):
+            timeout = ClientTimeout(total=timeout)
+        elif isinstance(timeout, timedelta):
+            timeout = ClientTimeout(total=timeout.total_seconds())
+
         self.application_id = application_id
         self.application_name = application_name
         self.application_version = application_version
         self.application_type = application_type
         self.os_version = os_version
-        self.default_timeout = default_timeout
+        self.timeout = timeout
 
         self._refresh_token = refresh_token
         self._refresh_token_expires_at = datetime.utcnow()
@@ -108,7 +109,7 @@ class Account:
     def __str__(self):
         return 'Account("{}", {})'.format(
             self._username,
-            self._user_id,
+            self._user_id or "<user ID unknown>",
         )
 
     def __repr__(self):
@@ -131,15 +132,14 @@ class Account:
 
         key = (host, port)
         if key not in self._connectors:
-            connector = CloudConnector(
-                access_token=self._access_token,
-                websocket_host=host,
-                websocket_port=port,
-                application_id=self.application_id
-            )
+            connector = CloudConnector(self, host, port)
             self._connectors[key] = connector
             return connector
         return self._connectors[key]
+
+    @property
+    def access_token(self) -> Optional[str]:
+        return self._access_token
 
     @property
     def access_token_expired(self) -> bool:
@@ -218,16 +218,19 @@ class Account:
             request_headers = headers
 
         async def post_request(request_session: ClientSession):
-            _LOGGER.debug('Making %s request to %s (headers: %s, args: %s)' % (method, url, headers, request_args))
-            async with request_session.request(method, url, headers=request_headers, **request_args) as response:
-                _LOGGER.debug('Full request URL: %s' % response.url)
-                _LOGGER.debug('Full request headers: %s' % dict(response.headers))
-                return response.status, await response.text()
+            try:
+                _LOGGER.debug('Making %s request to %s (headers: %s, args: %s)' % (method, url, headers, request_args))
+                async with request_session.request(method, url, headers=request_headers, **request_args) as response:
+                    return response.status, await response.text()
+            except client_exceptions.ClientConnectorError as e:
+                raise AccountConnectionException(self, e) from None
+            except asyncio.exceptions.TimeoutError:
+                raise AccountRequestTimeoutException(self) from None
 
         if use_session:
             status, content = await post_request(use_session)
         else:
-            async with ClientSession() as session:
+            async with ClientSession(timeout=self.timeout) as session:
                 status, content = await post_request(session)
 
         _LOGGER.debug('Received response (%d): %s' % (status, content))
@@ -282,7 +285,7 @@ class Account:
             raise AccountJSONInvalidException(self, e) from None
 
     # authentication handling
-    def _process_auth_response(self, response: Dict[str, Any]) -> NoReturn:
+    async def _process_auth_response(self, response: Dict[str, Any]) -> None:
         if not response:
             raise ValueError('response dictionary cannot be empty')
 
@@ -296,7 +299,15 @@ class Account:
         self._user_id = response['user']
         self._access_token_expires_at = datetime.utcnow() + timedelta(seconds=response['expires_in'])
 
-    async def authenticate(self, attempt_refresh: bool = True, expires_in: int = 86400) -> NoReturn:
+        connector_tasks = []
+        for connector in self._connectors.values():
+            if connector.is_connected:
+                connector_tasks.append(connector.authenticate())
+
+        if connector_tasks:
+            await asyncio.wait(connector_tasks, return_when=asyncio.ALL_COMPLETED)
+
+    async def authenticate(self, attempt_refresh: bool = True, expires_in: int = 86400) -> None:
         """Authenticate account with Hekr"""
         if attempt_refresh and self._refresh_token:
             if not self.refresh_token_expired:
@@ -310,7 +321,7 @@ class Account:
                         authenticated=False,
                         json=payload
                     )
-                    self._process_auth_response(response)
+                    await self._process_auth_response(response)
                     return
                 except (AccountCredentialsException, AccountUnknownResponseException) as e:
                     _LOGGER.debug('Refreshing token failed: %s; attempting regular authentication' % e)
@@ -334,7 +345,7 @@ class Account:
             authenticated=False,
             json=payload
         )
-        self._process_auth_response(response)
+        await self._process_auth_response(response)
 
     # Device info getters
     async def get_devices_info(self,
@@ -361,15 +372,13 @@ class Account:
         current_page = 0
 
         devices_info = list()
-        async with ClientSession() as session:
+        async with ClientSession(timeout=self.timeout) as session:
             more_devices = True
             while more_devices:
                 base_params.update({
                     'page': current_page,
                     'size': devices_per_request,
                 })
-
-                print(base_params)
 
                 response_devices_info = await self._do_json_request(
                     url=from_url,
@@ -402,7 +411,7 @@ class Account:
         for connector in self._connectors.values():
             connector.access_token = self._access_token
 
-    def update_devices_from_info(self, devices_info: Union[DeviceInfo, Iterable[DeviceInfo]]) -> NoReturn:
+    def update_devices_from_info(self, devices_info: Union[DeviceInfo, Iterable[DeviceInfo]]) -> None:
         if isinstance(devices_info, DeviceInfo):
             devices_info = [devices_info]
 
@@ -414,17 +423,33 @@ class Account:
 
     def create_devices_from_info(self,
                                  devices_info: Union[DeviceInfo, Iterable[DeviceInfo]],
-                                 protocols: Optional[Iterable['Protocol']] = None) -> List[Device]:
+                                 protocols: Optional[Iterable[Type['Protocol']]] = None,
+                                 only_detected: bool = False) -> List[Device]:
         """
         Create device objects attached to account based on provided info.
+        Warning! This method _does not_ check for the uniqueness of device IDs!
+
         :param devices_info: Information about devices (ex. via `get_devices`)
         :param protocols: Use specified protocols for detection
+        :param only_detected: Only consider devices with detected protocols created
         :return: List of devices that got attached to account.
         """
         new_devices = []
-        for device_info in ([DeviceInfo] if isinstance(devices_info, DeviceInfo) else devices_info):
+        for device_info in ([devices_info] if isinstance(devices_info, DeviceInfo) else devices_info):
             cloud_connector = self.get_device_control_connector(host=device_info.cloud_connect_host)
-            new_devices.append(Device(device_info, protocol=protocols, cloud_connector=cloud_connector))
+
+            device = Device(device_info)
+            device.cloud_connector = cloud_connector
+
+            detected_protocol = None
+            if protocols:
+                detected_protocol = device.detect_device_protocol(protocols, set_protocol=True)
+
+            if only_detected and detected_protocol is None:
+                del device
+                continue
+
+            new_devices.append(device)
 
         return new_devices
 
@@ -455,7 +480,8 @@ class Account:
             url=self.BASE_AUTH_URL + '/images/checkCaptcha',
             params={'rid': captcha_identifier, 'code': solution}
         )
-        print(response)
+        # @TODO: finish this
+        return response
 
     async def get_bind_network_password(self, ssid: str) -> str:
         """Get network password for binding"""

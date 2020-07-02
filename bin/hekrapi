@@ -2,22 +2,22 @@
 # PYTHON_ARGCOMPLETE_OK
 import argparse
 import asyncio
-import json
 import logging
-import sys
-from functools import partial
-from typing import Optional, Sequence, Dict, TYPE_CHECKING, IO, Tuple, TypeVar, Any, Mapping as MappingType, List, Set
+from cmd import Cmd
 from collections.abc import Mapping
-import textwrap as _textwrap
+from typing import Optional, Sequence, Dict, TYPE_CHECKING, IO, TypeVar, Any, Mapping as MappingType, List, Set, \
+    Type
 
-from hekrapi.const import FrameType, DeviceResponseState
+from hekrapi.enums import FrameType
 from hekrapi.device import Device
 from hekrapi.exceptions import HekrAPIException
-from hekrapi.protocol import Protocol, Argument
+from hekrapi.protocol import Protocol
 
 if TYPE_CHECKING:
     from hekrapi.account import Account
-    from hekrapi.protocol import Command
+
+class HekrAPIPrompt(Cmd):
+    pass
 
 HekrAPICLIParser = TypeVar('HekrAPICLIParser')
 
@@ -34,65 +34,25 @@ class AddArgToCommandCalls(argparse.Action):
             current_dict[self.dest] = value
 
 
-STR_BOOLEAN_TRUE = ['on', 'true', 'enable']
-STR_BOOLEAN_FALSE = ['off', 'false', 'disable']
+STR_BOOLEAN_TRUE = ['on', 'true', 'enable', '1', 'start']
+STR_BOOLEAN_FALSE = ['off', 'false', 'disable', '0', 'stop']
 STR_BOOLEAN_CHOICES = [*STR_BOOLEAN_TRUE, *STR_BOOLEAN_FALSE]
-boolean_converter = lambda x: x.lower() in STR_BOOLEAN_TRUE
 
 
-def get_protocol_command_parsers(protocols: Dict[str, 'Protocol'], parser: Optional[argparse.ArgumentParser] = None) -> argparse.ArgumentParser:
-    if parser is None:
-        parser = argparse.ArgumentParser(add_help=False)
-
-    protocol_parsers = parser.add_subparsers(help='Protocol from embedded protocol list')
-
-    for protocol_id, protocol in protocols.items():
-        protocol_parser = protocol_parsers.add_parser(protocol_id, help='Utilize the `%s` protocol' % protocol_id)
-        protocol_parser.set_defaults(protocol_id=protocol_id)
-
-        if protocol.commands:
-            commands = protocol_parser.add_subparsers(title='Supported protocols')
-            for command in protocol.commands:
-                if command.frame_type != FrameType.SEND:
-                    continue
-                command_parser = commands.add_parser(command.name, help='Internal command ID: %d' % command.command_id)
-                command_parser.set_defaults(command=command.command_id)
-
-                if command.arguments:
-                    for argument in command.arguments:
-                        help_str = 'Internal argument name: %s' % argument.variable
-                        to_type = argument.type_output
-
-                        if to_type == bool:
-                            to_type = str
-
-                        elif to_type not in [int, float, str]:
-                            to_type = str
-
-                        if argument.value_min is not None:
-                            if argument.value_max is not None:
-                                help_str += ' (%s <= value <= %s)' % (argument.value_min, argument.value_max)
-                            else:
-                                help_str += ' (%s <= value)' % argument.value_min
-                        elif argument.value_max is not None:
-                            help_str += ' (value <= %s)' % argument.value_max
-
-                        # @TODO: find out why half of the options don't work
-                        command_parser.add_argument(
-                            '--' + argument.name,
-                            required=argument.value_default is None,
-                            default=argument.value_default,
-                            help=help_str,
-                            type=to_type,
-                            action=AddArgToCommandCalls,
-                            choices=STR_BOOLEAN_CHOICES if argument.type_output == bool else None
-                        )
-
-    return parser
+def boolean_converter(value: str) -> bool:
+    lower_value = value.lower()
+    if lower_value in STR_BOOLEAN_TRUE:
+        return True
+    if lower_value in STR_BOOLEAN_FALSE:
+        return False
+    raise ValueError('value does not evaluate to boolean')
 
 
-def prepare_arguments(protocols: Dict[str, 'Protocol']) -> HekrAPICLIParser:
-    parser: HekrAPICLIParser = argparse.ArgumentParser(description='Manipulate supported Hekr devices and accounts')
+def commandline_routine():
+
+
+def prepare_arguments(protocols: Dict[str, Type['Protocol']]) -> HekrAPICLIParser:
+    parser = argparse.ArgumentParser(description='Manipulate supported Hekr devices and accounts')
     parser.add_argument(
         '-d', '--debug',
         help="Print lots of debugging statements",
@@ -105,74 +65,164 @@ def prepare_arguments(protocols: Dict[str, 'Protocol']) -> HekrAPICLIParser:
         action='store_const', dest="loglevel", const=logging.INFO,
     )
 
-    # -- Protocol parser
-    embedded_protocol_parser = argparse.ArgumentParser(add_help=False)
-    embedded_protocol_parser.add_argument('protocol_id', help='Embedded protocol to utilize', choices=protocols.keys())
+    # Cloud authentication
+    cloud_group = argparse.ArgumentParser(
+        description='Utilize local endpoint when executing command / polling device',
+        add_help=False
+    )
+    cloud_group.add_argument(
+        '--username', '-u',
+        help='Account username',
+        action='store',
+        required=True
+    )
+    cloud_group.add_argument(
+        '--password', '-p',
+        help='Account password',
+        action='store',
+        required=True
+    )
 
-    # -- Cloud authentication parser
-    cloud_authentication_parser = argparse.ArgumentParser(add_help=False)
-    cloud_authentication_parser.add_argument('--username', '-u', help='Account username', action='store', required=True)
-    cloud_authentication_parser.add_argument('--password', '-p', help='Account password', action='store', required=True)
+    # Local authentication
+    def check_host_port(value: str):
+        parts = value.split(':')
+        if len(parts) > 2:
+            raise ValueError('too many parts')
+        port = None
+        if len(parts) == 2:
+            if parts[1].isnumeric():
+                port = int(parts[1])
+                if port < 1 or port > 65535:
+                    raise ValueError('port value must be inclusively between 1 and 65535')
+            else:
+                raise ValueError('port must be a number')
+        return parts[0], port
+
+    local_group = argparse.ArgumentParser(
+        description='Utilize local endpoint when executing command / polling device',
+        add_help=False
+    )
+    local_group.add_argument(
+        'device_id',
+        help='Device ID',
+        action='store',
+        metavar='<device ID>'
+    )
+    local_group.add_argument(
+        '--control_key', '-k',
+        help='Control key',
+        action='store',
+        metavar='<control key>',
+        required=False
+    )
+    local_group.add_argument(
+        '--host', '-H',
+        help='Host to connect to (an attempt will be made to determine '
+             'the host using internal discovery algorithms)',
+        metavar='HOST[:PORT]',
+        type=check_host_port,
+        required=False,
+    )
 
     # Parser definition
-    subparsers = parser.add_subparsers(title='available sub-commands')
+    subparsers = parser.add_subparsers(title='available sub-commands', dest='section')
 
-    # Device command
-    device = subparsers.add_parser('device', help='Device-related actions')
-    device.add_argument('--host', '-H', help='Local device host', metavar='<hostname / IP address>', required=True)
-    device.add_argument('device_id', help='Device identifier', metavar='<device ID>')
-    device.add_argument('--control_key', '-k', help='Device control key', metavar='<key>', required=True)
-    device.set_defaults(section='device')
-    device_actions = device.add_subparsers(title='Available options')
+    # - Commandline section
+    subparsers.add_parser('interactive', help='Launch interactive shell to connect to devices')
 
+    # - Device section
     # --- Execute command
-    execute = device_actions.add_parser('execute', help='Execute command on target local device')
-    execute.set_defaults(action='execute')
-    get_protocol_command_parsers(protocols, execute)
-    #execute.add_argument('command', help='Command from one of the embedded protocols. '
-    #                                     'See `hekrapi protocol list` for full list of commands. '
-    #                                     'This function also supports auto-completion.',
-    #                     metavar='<protocol ID>.<command name>',
-    #                     type=str, choices=command_choices)
+    execute = subparsers.add_parser('execute', help='Execute command on target local device', parents=[local_group])
 
-    # --- Listen command
-    listen = device_actions.add_parser('listen', help='Listen for responses on target local device')
-    listen.set_defaults(action='listen')
-    listen.add_argument('--port', type=int, required=True)
+    protocol_commands = execute.add_subparsers(
+        title='available protocols',
+        dest='protocol_id',
+        required=True,
+        metavar='PROTOCOL_ID'
+    )
 
-    # Account command
-    account = subparsers.add_parser('account', help='Account-related actions', parents=[cloud_authentication_parser])
-    account.set_defaults(section='account')
-    _account = account.add_subparsers(title='Available options')
+    for protocol_id, protocol in protocols.items():
+        callable_commands = {
+            name: command
+            for name, command in protocol.commands_by_name.items()
+            if command.frame_type in [FrameType.SEND, ]
+        }
+
+        if callable_commands:
+            protocol_parser = protocol_commands.add_parser(
+                protocol_id,
+                help='%s protocol (command count: %d)'
+                     % (protocol.protocol_name, len(callable_commands))
+            )
+            command_subparsers = protocol_parser.add_subparsers(
+                title='available commands',
+                dest='command',
+                required=True
+            )
+            for name, command in callable_commands.items():
+                command_parser = command_subparsers.add_parser(
+                    name,
+                    help='Command ID %d: %s' % (command.command_id, command.__doc__),
+                )
+                if command.arguments:
+                    for argument in command.arguments:
+                        command_parser.add_argument(
+                            '--' + argument.name,
+                            help=argument.__doc__,
+                            required=argument.value_default is None,
+                            default=argument.value_default,
+                        )
+
+    # ---- Listen command
+    listen = subparsers.add_parser('listen', help='Listen to responses on target local device', parents=[local_group])
+    listen.add_argument(
+        '--protocol', '-p',
+        help='Optionally consider responses to be protocol-bound',
+        dest='protocol_id',
+        required=False,
+        metavar='PROTOCOL_ID'
+    )
+    listen.add_argument(
+        '--raw',
+        help='Do not process received data',
+        dest='raw_responses',
+        required=False,
+        action='store_true',
+        default=False
+    )
+
+    # ---- Tests command
+    tests = subparsers.add_parser('tests', help='Testing toolbox')
+    tests_subparsers = tests.add_subparsers(dest='action', required=True)
+
+    # ------ Socket server
+    socket_server = tests_subparsers.add_parser('udp_server', help='UDP Server with logging')
+    socket_server.add_argument(
+        '--port', '-p',
+        help='Listen port (default: %(default)s)',
+        default=10001,
+        dest='listen_port',
+        type=int,
+    )
+    socket_server.add_argument(
+        '--host', '-H',
+        help='Listen address (default: %(default)s)',
+        default='0.0.0.0',
+        dest='listen_host',
+    )
+
+    # - Account section
+    account = subparsers.add_parser('account', help='Account-related actions')
+    _account = account.add_subparsers(title='Available options', dest='action', required=True)
 
     # --- Check command
-    account_check = _account.add_parser('check', help='Check authorization with account')
-    account_check.set_defaults(action='check')
+    _account.add_parser('check', help='Check authorization with account')
 
+    # --- Devices command
     account_devices = _account.add_parser('devices', help='List devices associated with account')
     account_devices.add_argument('--columns',
                                  help='Column to show in the output\nCan be stacked to show multiple columns',
                                  nargs='+', default=['devTid', 'lanIp', 'ctrlKey'])
-    account_devices.set_defaults(action='devices')
-
-    # Protocol command
-    protocol = subparsers.add_parser('protocol', help='Protocol manipulation')
-    protocol.set_defaults(section='protocol')
-    protocol_actions = protocol.add_subparsers(title='Available options')
-
-    # --- Protocol dump
-    dump = protocol_actions.add_parser('dump',
-                                       help='Dump definition of embedded protocol')
-    dump.add_argument('protocol_id', help='Embedded protocol to utilize', choices=['all', *protocols.keys()])
-    dump.add_argument('--format', '-f', help='Format output (default: %(default)s)',
-                      choices=Protocol.serialization_formats,
-                      default=Protocol.default_serialization_format)
-    dump.set_defaults(action='dump')
-
-    # --- List commands
-    _list = protocol_actions.add_parser('list',
-                                        help='Print list of embedded protocols with their descriptions')
-    _list.set_defaults(action='list')
 
     return parser
 
@@ -192,7 +242,29 @@ def _get_dict_key_with_dots(source_dict: MappingType[str, Any], path: str):
     return value
 
 
-async def parse_arguments(protocols: Dict[str, 'Protocol'], descriptions: Optional[Dict[str, str]] = None,
+def _create_device(args: argparse.Namespace, protocols: Dict[str, Any]):
+    device = Device(device_id=args.device_id)
+    protocol_id = getattr(args, 'protocol_id', None)
+    if protocol_id is not None:
+        device.protocol = protocols[args.protocol_id]
+        print(device.protocol)
+
+    control_key = getattr(args, 'control_key', None)
+    if control_key is not None:
+        device.control_key = args.control_key
+    return device
+
+
+async def _connect_device(args: argparse.Namespace, device: 'Device'):
+    host, port = args.host
+    local_connector = device.create_local_connector(host=host, port=port)
+    device.local_connector.timeout = 2
+    await local_connector.open_connection()
+    await local_connector.authenticate()
+    return local_connector
+
+
+async def parse_arguments(protocols: Dict[str, Type['Protocol']], descriptions: Optional[Dict[str, str]] = None,
                           args: Optional[Sequence[str]] = None, output_stream: Optional[IO] = None,
                           parser: Optional[HekrAPICLIParser] = None):
     if output_stream is None:
@@ -208,50 +280,58 @@ async def parse_arguments(protocols: Dict[str, 'Protocol'], descriptions: Option
 
     logging.basicConfig(stream=output_stream, level=args.loglevel)
 
-    if not hasattr(args, 'section'):
+    print(args)
+
+    if not (hasattr(args, 'section') and args.section):
         parser.print_help(file=output_stream)
-    elif args.section == 'device':
-        if args.action == 'discover':
-            pass
-        else:
-            if args.action == 'execute':
-                print(args)
-                device = Device.using_local(
-                    device_id=args.device_id,
-                    control_key=args.control_key,
-                    host=args.host,
-                    protocol=protocols[args.protocol_id]
-                )
-                device.local_connector.timeout = 30
 
-                await device.open_connections()
-                await device.authenticate()
+    elif args.section == 'interactive':
+        return commandline_routine()
 
-                try:
-                    for i in range(1, 3):
-                        await device.command(
-                            command=args.command,
-                            data=getattr(args, 'arguments', None)
-                        )
-                    try:
-                        await asyncio.wait_for(device.local_connector.listen_responses(), 30)
-                    except asyncio.TimeoutError:
-                        pass
+    elif args.section == 'execute':
+        device = _create_device(args, protocols)
+        try:
+            local_connector = await _connect_device(args, device)
+            await device.command(
+                command=args.command,
+                arguments=getattr(args, 'arguments', None)
+            )
+            try:
+                await asyncio.wait_for(local_connector.listener_runner(lambda x: print(x.view())), 30)
+            except asyncio.TimeoutError:
+                pass
 
-                except HekrAPIException as e:
-                    print(f'ERROR: {e}', file=output_stream)
+        except HekrAPIException as e:
+            print(f'ERROR:Error occurred while performing commands on {device}: {e}', file=output_stream)
 
-            elif args.action == 'listen':
-                device = Device.using_local(
-                    device_id=args.device_id,
-                    control_key=args.control_key,
-                    host=args.host,
-                    port=args.port
-                )
-                await device.local_connector.open_connection()
-                await device.authenticate()
-                await device.local_connector.listen_responses()
+    elif args.section == 'listen':
+        device = _create_device(args, protocols)
+        try:
+            local_connector = await _connect_device(args, device)
+            await local_connector.listener_runner(lambda x: print(x.view()), raw_responses=args.raw_responses)
 
+        except HekrAPIException as e:
+            print(f'ERROR:Error occurred while running listener on {device}: {e}', file=output_stream)
+
+    elif args.section == 'tests':
+        if args.action == 'udp_server':
+            def udp_server():
+                import socket
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+                listen_on = (args.listen_host, args.listen_port)
+
+                print("Listening on udp %s:%s" % listen_on, file=output_stream)
+
+                s.bind(listen_on)
+                while True:
+                    yield s.recvfrom(128 * 1024)
+
+            for data, addr in udp_server():
+                print('from %s received: %s' % (addr, data), file=output_stream)
+
+    # old stuff
     elif args.section == 'protocol':
         if args.action == 'dump':
             if args.protocol_id == 'all':
@@ -295,7 +375,7 @@ async def parse_arguments(protocols: Dict[str, 'Protocol'], descriptions: Option
                 for device_info in await account.get_devices_info():
                     row_values = []
                     for column in args.columns:
-                        value = _get_dict_key_with_dots(device_info, column)
+                        value = _get_dict_key_with_dots(device_info.device_info_source, column)
                         if value is None:
                             row_values.append('[Not found]')
                         elif isinstance(value, (List, Set, Mapping)):
@@ -313,9 +393,10 @@ async def parse_arguments(protocols: Dict[str, 'Protocol'], descriptions: Option
 
 def main():
     import asyncio
+    from hekrapi.protocol import load_all_supported_protocols
 
-    from hekrapi.protocols import PROTOCOLS, DESCRIPTIONS
-    parser = prepare_arguments(PROTOCOLS)
+    protocols = load_all_supported_protocols()
+    parser = prepare_arguments(protocols)
 
     try:
         # noinspection PyUnresolvedReferences
@@ -325,7 +406,7 @@ def main():
     except ImportError:
         pass
 
-    asyncio.run(parse_arguments(PROTOCOLS, DESCRIPTIONS, parser=parser))
+    asyncio.run(parse_arguments(protocols, parser=parser), debug=False)
 
 
 if __name__ == '__main__':
