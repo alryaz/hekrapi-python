@@ -5,15 +5,10 @@ from enum import auto, Enum, Flag
 from hekrapi.exceptions import HekrAPIException
 from typing import TYPE_CHECKING, NamedTuple, Union, Optional
 
-from hekrapi.connector import LocalConnector, _LocalEndpointConnector
+from hekrapi.connector import DirectConnector, BaseUDPConnector
 
 from hekrapi.protocol import Protocol, Encoding, Command, Argument, register_supported_protocol
 from hekrapi.enums import FrameType, DeviceResponseState
-
-try:
-    from typing import NoReturn
-except ImportError:
-    NoReturn = None
 
 if TYPE_CHECKING:
     from hekrapi.connector import Response
@@ -137,9 +132,8 @@ def to_device_type(generic_type: Union[GenericType, ConvertedDeviceType],
 DEVICE_TYPE_CONVERTER = (from_device_type, to_device_type)
 
 
-class ELROLocalConnector(_LocalEndpointConnector):
-
-    async def _internal_authenticate(self) -> NoReturn:
+class ELROLocalConnector(BaseUDPConnector):
+    async def _internal_authenticate(self) -> None:
         device = self.attached_device
         if device is None:
             raise HekrAPIException('No devices attached to connector (required to perform authentication)')
@@ -155,14 +149,9 @@ class ELROLocalConnector(_LocalEndpointConnector):
                 # device=self.attached_device
             )
 
-        response = super(ELROLocalConnector, self).process_response(response_str)
+        return super().process_response(response_str)
 
-        if response.state == DeviceResponseState.UNKNOWN:
-            pass
-
-        return response
-
-    async def _acknowledge_response(self, response: 'Response') -> NoReturn:
+    async def _acknowledge_response(self, response: 'Response') -> None:
         await self._internal_send_request('{"answer": "APP_answer_OK"}')
 
 

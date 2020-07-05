@@ -11,6 +11,8 @@ __all__ = [
     'BaseNetworkConnector',
     'BaseWebSocketConnector',
     'BaseActionAuthenticationConnector',
+    'BaseCloudConnector',
+    'BaseDirectConnector',
 
     # Additional exports
     'supports_async_timeout',
@@ -68,7 +70,7 @@ def supports_async_timeout(func: Callable[..., ReturnType]) -> Callable[..., Ret
             return await asyncio.wait_for(func(connector, *args, **kwargs), timeout=timeout)
 
         except asyncio.TimeoutError:
-            raise ConnectorTimeoutException(connector, func.__name__)
+            raise ConnectorTimeoutException(connector, func.__name__) from None
 
     wrapper.__name__ = func.__name__
     wrapper.__doc__ = (func.__doc__ or func.__name__.lower().replace('_', ' ').capitalize()) + \
@@ -285,8 +287,8 @@ class BaseConnector(ABC):
         :param device: Device to attach
         :param set_device_connector: Set device connector
         """
-        for device in self._attached_devices:
-            if device.device_id == device.device_id:
+        for other_device in self._attached_devices:
+            if other_device.device_id == device.device_id:
                 raise ConnectorDeviceCollisionException(self, device.device_id)
 
         if set_device_connector:
@@ -965,16 +967,19 @@ class BaseUDPConnector(BaseNetworkConnector, ABC):
 
         endpoint = DirectConnector.Endpoint(None)
 
-        await loop.create_datagram_endpoint(
-            remote_addr=(self._host, self._port),
-            protocol_factory=lambda: BaseUDPConnector.EndpointProtocol(
-                endpoint,
-                fut_conn_made,
-                fut_conn_lost
+        try:
+            await loop.create_datagram_endpoint(
+                remote_addr=(self._host, self._port),
+                protocol_factory=lambda: BaseUDPConnector.EndpointProtocol(
+                    endpoint,
+                    fut_conn_made,
+                    fut_conn_lost
+                )
             )
-        )
+            result = await fut_conn_made
+        except OSError as e:
+            raise ConnectorCouldNotConnectException(self, e) from None
 
-        result = await fut_conn_made
         if result is False:
             if fut_conn_lost.done():
                 exception = fut_conn_lost.exception()
