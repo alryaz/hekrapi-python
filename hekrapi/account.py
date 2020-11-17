@@ -39,7 +39,7 @@ class Account:
     """
 
     BASE_URL = 'https://user-openapi.hekreu.me'
-    BASE_AUTH_URL = 'https://uaa-openapi.hekr.me'
+    BASE_AUTH_URL = 'https://uaa-openapi.hekreu.me'
 
     def __init__(self, username: Optional[str] = None, password: Optional[str] = None,
                  access_token: Optional[str] = None, refresh_token: Optional[str] = None,
