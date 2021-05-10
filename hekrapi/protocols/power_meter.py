@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """ Basic protocol definition for a smart power meter """
 from enum import IntEnum
+from typing import Union, Any
 
-from ..argument import Argument
+from ..argument import Argument, OptionalArgument
 from ..command import Command, FrameType
 from ..protocol import Protocol, TO_STR, TO_FLOAT, TO_BOOL, TO_SIGNED_FLOAT
 
@@ -52,7 +53,7 @@ PROTOCOL = Protocol(
         Argument("warning_current", CurrentWarning, 1, "fault_Over_I"),
         Argument("delay_timer", int, 2, "tmCd_M", value_min=0, value_max=1440),
         Argument("delay_enabled", TO_BOOL, 1, "tmCdO_Sw"),
-        Argument("warning_battery", PowerSupplyWarning, 1, "fault_SurplusDeficiency")
+        OptionalArgument("warning_battery", PowerSupplyWarning, 1, "fault_SurplusDeficiency"),
     ]),
     Command(2, FrameType.SEND, "querySet", response_command_id=8),
     Command(3, FrameType.SEND, "setLimit", arguments=[

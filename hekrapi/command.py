@@ -3,7 +3,7 @@
 
 from typing import List
 
-from .argument import Argument
+from .argument import Argument, OptionalArgument
 from .const import FrameType
 from .exceptions import HekrTypeError, HekrValueError, InvalidDataMissingKeyException, \
     InvalidDataGreaterThanException, InvalidDataLessThanException
@@ -261,6 +261,8 @@ class Command:
             value_input = data.get(key, None)
 
             if value_input is None:
+                if isinstance(argument, OptionalArgument):
+                    continue
                 raise InvalidDataMissingKeyException(data_key=key)
 
             if argument.value_min is not None and argument.value_min > value_input:
@@ -300,6 +302,8 @@ class Command:
 
             next_pos = current_pos + argument.byte_length
             if next_pos > data_length:
+                if isinstance(argument, OptionalArgument):
+                    continue
                 raise InvalidDataMissingKeyException(data_key=key)
 
             value_output = int.from_bytes(data[current_pos:next_pos], byteorder='big', signed=False)

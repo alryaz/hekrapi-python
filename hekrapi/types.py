@@ -1,8 +1,14 @@
 """Types for Hekr API project."""
 
-from typing import Tuple, Dict, Any, Union, Optional, Callable
+from typing import Tuple, Dict, Any, Union, Optional, Callable, TYPE_CHECKING
 
 from .const import DeviceResponseState
+
+if TYPE_CHECKING:
+    # noinspection PyUnresolvedReferences
+    from .command import Command
+    # noinspection PyUnresolvedReferences
+    from .device import Device
 
 DecodeResult = Tuple['Command', Dict[str, Any], int]
 MessageID = int

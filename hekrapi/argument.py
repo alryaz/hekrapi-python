@@ -12,13 +12,13 @@ class Argument:
     """Argument class for HekrAPI"""
 
     def __init__(self, name: str,
-                 value_type: Union[Tuple[ArgumentType, ArgumentType], ArgumentType]=int,
-                 byte_length: int=1,
-                 variable: Optional[str]=None,
-                 multiplier: Optional[Union[int, float]]=None,
-                 decimals: Optional[int]=None,
-                 value_min: Optional[Union[int, float]]=None,
-                 value_max: Optional[Union[int, float]]=None,
+                 value_type: Union[Tuple[ArgumentType, ArgumentType], ArgumentType] = int,
+                 byte_length: int = 1,
+                 variable: Optional[str] = None,
+                 multiplier: Optional[Union[int, float]] = None,
+                 decimals: Optional[int] = None,
+                 value_min: Optional[Union[int, float]] = None,
+                 value_max: Optional[Union[int, float]] = None,
                  ):
         """Argument class constructor
 
@@ -105,3 +105,7 @@ class Argument:
     def variable(self, value):
         """Setter for variable name"""
         self.__variable = value
+
+
+class OptionalArgument(Argument):
+    """Argument that is optional in datagrams"""

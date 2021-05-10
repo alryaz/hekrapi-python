@@ -30,6 +30,8 @@ import warnings
 
 
 # Datagram protocol
+from typing import Callable
+
 
 class DatagramEndpointProtocol(asyncio.DatagramProtocol):
     """Datagram protocol for the endpoint high-level interface."""
@@ -149,7 +151,7 @@ class RemoteEndpoint(Endpoint):
     It is initialized with an optional queue size for the incoming datagrams.
     """
 
-    def send(self, data):
+    def send(self, data, **kwargs):
         """Send a datagram to the remote host."""
         super().send(data, None)
 
@@ -165,7 +167,7 @@ class RemoteEndpoint(Endpoint):
 # High-level coroutines
 
 async def open_datagram_endpoint(
-        host, port, *, endpoint_factory=Endpoint, remote=False, **kwargs):
+        host, port, *, endpoint_factory=Callable[[], Endpoint], remote=False, **kwargs):
     """Open and return a datagram endpoint.
 
     The default endpoint factory is the Endpoint class.
@@ -209,10 +211,12 @@ async def open_remote_endpoint(
 # Testing
 
 try:
+    # noinspection PyPackageRequirements,PyUnresolvedReferences
     import pytest
-    pytestmark = pytest.mark.asyncio
 except ImportError:  # pragma: no cover
     pass
+else:
+    pytestmark = pytest.mark.asyncio
 
 
 async def test_standard_behavior():

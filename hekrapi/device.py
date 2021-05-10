@@ -419,7 +419,7 @@ class LocalConnector(_BaseConnector):
 
     async def send_request(self, request_str: str) -> None:
         _LOGGER.debug('Sending request via %s with content: %s' % (self, request_str))
-        self._endpoint.send(str.encode(request_str))
+        self._endpoint.send(str.encode(request_str), )
 
     async def read_response(self) -> str:
         _LOGGER.debug('Starting receiving on %s' % self)
