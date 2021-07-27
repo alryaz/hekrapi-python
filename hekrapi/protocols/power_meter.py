@@ -104,7 +104,7 @@ PROTOCOL = Protocol(
         Argument("active_power_1", TO_SIGNED_FLOAT, 3, "active_Power1", multiplier=0.0001, value_min=-99.9999, value_max=99.9999),
         Argument("active_power_2", TO_SIGNED_FLOAT, 3, "active_Power2", multiplier=0.0001, value_min=-99.9999, value_max=99.9999),
         Argument("active_power_3", TO_SIGNED_FLOAT, 3, "active_Power3", multiplier=0.0001, value_min=-99.9999, value_max=99.9999),
-        Argument("total_power_factor", TO_SIGNED_FLOAT, 2, "total_Constant", multiplier=0.0001, value_min=-99.9999, value_max=99.9999),
+        Argument("total_power_factor", TO_SIGNED_FLOAT, 2, "total_Constant", multiplier=0.001, value_min=-99.9999, value_max=99.9999),
         Argument("power_factor_1", TO_FLOAT, 2, "constant1", multiplier=0.001, value_min=0, value_max=9.999),
         Argument("power_factor_2", TO_FLOAT, 2, "constant2", multiplier=0.001, value_min=0, value_max=9.999),
         Argument("power_factor_3", TO_FLOAT, 2, "constant3", multiplier=0.001, value_min=0, value_max=9.999),
