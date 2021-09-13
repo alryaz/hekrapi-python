@@ -2,7 +2,9 @@
 # pylint: disable=too-many-arguments
 """Protocol class module for Hekr API"""
 __all__ = [
-    'Protocol',
+    'RawProtocol',
+    'DictProtocol',
+    'BaseProtocol',
     'TO_FLOAT',
     'TO_BOOL',
     'TO_STR',
@@ -10,8 +12,8 @@ __all__ = [
     'signed_float_converter'
 ]
 from json import dumps as json_dumps
-
-from typing import TYPE_CHECKING, Union, List, Dict, Optional, Callable
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Union, List, Dict, Optional, Callable, Mapping, Any
 
 from .command import Command
 from .const import FRAME_START_IDENTIFICATION
@@ -62,18 +64,23 @@ def remove_none(obj):
         return obj
 
 
-class Protocol:
-    """ Protocol definition class """
-
-    def __init__(self, *args, compatibility_checker: Optional[Callable[['Device'], bool]] = None):
+class BaseProtocol(ABC):
+    def __init__(self, *args, compatibility_checker: Optional[Callable[['Device'], bool]] = None, name: Optional[str] = None):
         """
         Protocol definition constructor.
 
         :param args: Variable-length of arguments, `Command` objects.
         """
         self.commands = list(args)
+        self.name = name or "unnamed protocol"
 
         self.compatibility_checker = compatibility_checker
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__}:\"{self.name}\", {len(self.commands)} commands>"
+
+    def __str__(self) -> str:
+        return repr(self)
 
     @property
     def commands(self) -> List[Command]:
@@ -120,93 +127,6 @@ class Protocol:
             CommandNotFoundException: if command is not found.
         """
         return self.get_command(key)
-
-    def decode(self,
-               raw: Union[str, bytes, bytearray],
-               use_variable_names=False,
-               filter_values=True) -> DecodeResult:
-        """
-        Decode raw datagram
-        :param raw: Raw datagram
-        :param use_variable_names: Use variable names as data keys
-        :param filter_values: Apply filters to values
-        :type: protocol: Protocol
-        :type: raw: str, bytes, bytearray
-        :type: use_variable_names: bool
-        :type: filter_values: bool
-        :return: command object, dictionary of values, frame number
-        :rtype: (Command, dict[str, Any], int)
-        """
-        if isinstance(raw, str):
-            decoded = bytearray.fromhex(raw)
-        elif isinstance(raw, bytes):
-            decoded = bytearray(raw)
-        elif isinstance(raw, bytearray):
-            decoded = raw
-        else:
-            raise HekrTypeError(variable='raw', expected=[str, bytearray], got=type(raw))
-
-        if decoded[0] != FRAME_START_IDENTIFICATION:
-            raise InvalidMessagePrefixException(raw)
-
-        frame_length = decoded[1]
-        if frame_length != len(decoded):
-            raise InvalidMessageLengthException(raw)
-
-        checksum = decoded[-1]
-        current_checksum = sum(decoded[:-1]) % 0x100
-        if checksum != current_checksum:
-            raise InvalidMessageChecksumException(raw)
-
-        frame_type = decoded[2]
-        command_id = decoded[4]
-        command = self.get_command_by_id(command_id)
-        if frame_type != command.frame_type.value:
-            raise InvalidMessageFrameTypeException(raw)
-
-        frame_number = decoded[3]
-
-        data = command.decode(decoded[5:-1], use_variable_names, filter_values)
-
-        return command, data, frame_number
-
-    def encode(self,
-               command: AnyCommand,
-               data: CommandData = None,
-               frame_number: int = 1,
-               use_variable_names=False,
-               filter_values=True) -> str:
-        """
-        Encode data into raw datagram.
-        :param command: Command object/ID/name
-        :param data: Dictionary of values
-        :param frame_number: Frame number
-        :param use_variable_names: Use variable names as data keys
-        :param filter_values: Apply filters to values
-        :return: Raw datagram
-        :rtype: str
-        """
-        command = self.get_command(command)
-
-        if not data:
-            data = {}
-
-        encoded_command = command.encode(
-            data=data,
-            use_variable_names=use_variable_names,
-            filter_values=filter_values
-        )
-
-        raw = bytearray()
-        raw.append(FRAME_START_IDENTIFICATION)
-        raw.append(command.frame_type.value)
-        raw.append(frame_number % 256)
-        raw.append(command.command_id)
-        raw.extend(encoded_command)
-        raw.insert(1, len(raw) + 2)
-        raw.append(sum(raw) % 0x100)
-
-        return raw.hex().upper()
 
     def is_device_compatible(self, device: 'Device') -> bool:
         """
@@ -271,69 +191,157 @@ class Protocol:
             "Argument 'command' (type %s) does not evaluate to any supported command type" %
             command)
 
-    def get_definition_dict(self, filter_empty=True) -> Dict:
+    @abstractmethod
+    def decode(
+        self,
+        data: Mapping[str, Any],
+        use_variable_names: bool = False,
+        filter_values: bool = True
+    ) -> DecodeResult:
         """
-        Returns protocol definition as Python dictionary.
-
-        :param filter_empty: Filter out empty values
-        :return: Protocol definition
-        :rtype: dict
+        Decode response.
+        :param raw: Raw datagram
+        :param use_variable_names: Use variable names as data keys
+        :param filter_values: Apply filters to values
+        :type: protocol: Protocol
+        :type: raw: str, bytes, bytearray
+        :type: use_variable_names: bool
+        :type: filter_values: bool
+        :return: command object, dictionary of values, frame number
+        :rtype: (Command, dict[str, Any], int)
         """
-        definition = {
-            "commands": [
-                {
-                    "name": command.name,
-                    "command_id": command.command_id,
-                    "frame_type": command.frame_type.name.lower(),
-                    "response_command_id": command.response_command_id,
-                    "arguments": [
-                        {
-                            "name": argument.name,
-                            "variable": argument.variable,
-                            "byte_length": argument.byte_length,
-                            "type_input": argument.type_input.__name__,
-                            "type_output": argument.type_output.__name__,
-                            "value_min": argument.value_min,
-                            "value_max": argument.value_max,
-                            "multiplier": argument.multiplier,
-                            "decimals": argument.decimals,
-                        }
-                        for argument in command.arguments
-                    ] if command.arguments else None
-                }
-                for command in self.commands
-            ]
-        }
-        return remove_none(definition) if filter_empty else definition
+        raise NotImplementedError
 
-    default_serialization_format = 'json'
-    serialization_formats = {
-        'json': lambda definition: json_dumps(definition, ensure_ascii=False),
-    }
-
-    def get_definition_serialized(self, output_format: Optional[str] = None) -> str:
+    @abstractmethod
+    def encode(self, command: AnyCommand, data: Mapping[str, Any], frame_number: int = 1, use_variable_names: bool = False, filter_values: bool = True) -> Dict[str, Any]:
         """
-        Returns protocol definition as serialized dictionary.
-
-        :param output_format: Output format
-        :type output_format: str
-        :return: Serialized definition dictionary
-        :rtype: str
+        Encode data into request.
+        :param command: Command object/ID/name
+        :param data: Dictionary of values
+        :param frame_number: Frame number
+        :param use_variable_names: Use variable names as data keys
+        :param filter_values: Apply filters to values
+        :return: Encoded request
         """
-        if output_format is None:
-            output_format = self.default_serialization_format
-        elif output_format not in self.serialization_formats:
-            raise HekrValueError(variable='output_format', expected=['json'], got=output_format)
+        raise NotImplementedError
 
-        definition = self.get_definition_dict()
 
-        return self.serialization_formats[output_format](definition)
+class RawProtocol(BaseProtocol):
+    """ Protocol definition class """
 
-    def print_definition(self, output_format: Optional[str] = None) -> None:
-        """
-        Prints protocol definition.
+    def decode(
+        self,
+        data: Union[Mapping[str, Any], str, bytes, bytearray],
+        use_variable_names: bool = False,
+        filter_values: bool = True
+    ) -> DecodeResult:
+        if isinstance(data, Mapping):
+            if "raw" not in data:
+                raise ValueError("mapping does not contain \"raw\" key")
+            return self.decode(data["raw"], use_variable_names=use_variable_names, filter_values=filter_values)
+        
+        if isinstance(raw, str):
+            decoded = bytearray.fromhex(raw)
+        elif isinstance(raw, bytes):
+            decoded = bytearray(raw)
+        elif isinstance(raw, bytearray):
+            decoded = raw
+        else:
+            raise HekrTypeError(variable='raw', expected=[str, bytearray], got=type(raw))
 
-        :param output_format: Output format
-        :type: output_format: str
-        """
-        print(self.get_definition_serialized(output_format=output_format))
+        if decoded[0] != FRAME_START_IDENTIFICATION:
+            raise InvalidMessagePrefixException(raw)
+
+        frame_length = decoded[1]
+        if frame_length != len(decoded):
+            raise InvalidMessageLengthException(raw)
+
+        checksum = decoded[-1]
+        current_checksum = sum(decoded[:-1]) % 0x100
+        if checksum != current_checksum:
+            raise InvalidMessageChecksumException(raw)
+
+        frame_type = decoded[2]
+        command_id = decoded[4]
+        command = self.get_command_by_id(command_id)
+        if frame_type != command.frame_type.value:
+            raise InvalidMessageFrameTypeException(raw)
+
+        frame_number = decoded[3]
+
+        data = command.decode_raw(decoded[5:-1], use_variable_names, filter_values)
+
+        return command, data, frame_number
+
+    def encode(
+        self,
+        command: AnyCommand,
+        data: CommandData = None,
+        frame_number: int = 1,
+        use_variable_names: bool = False,
+        filter_values: bool = True
+    ) -> Dict[str, Any]:
+
+        command = self.get_command(command)
+
+        if not data:
+            data = {}
+
+        encoded_command = command.encode_raw(
+            data=data,
+            use_variable_names=use_variable_names,
+            filter_values=filter_values
+        )
+
+        raw = bytearray()
+        raw.append(FRAME_START_IDENTIFICATION)
+        raw.append(command.frame_type.value)
+        raw.append(frame_number % 256)
+        raw.append(command.command_id)
+        raw.extend(encoded_command)
+        raw.insert(1, len(raw) + 2)
+        raw.append(sum(raw) % 0x100)
+
+        return {"raw": raw.hex().upper()}
+
+
+class DictProtocol(BaseProtocol):
+    def decode(
+        self,
+        data: Mapping[str, Any],
+        use_variable_names=False,
+        filter_values=True
+    ) -> DecodeResult:
+        command_id = data.get("cmdId")
+        
+        if command_id is None:
+            raise InvalidDataMissingKeyException(data_key="cmdId")
+        
+        command = self.get_command(int(command_id))
+
+        data = command.decode_dict(
+            data,
+            use_variable_names=use_variable_names,
+            filter_values=filter_values,
+        )
+        
+        return command, data, -1
+
+    def encode(
+        self,
+        command: AnyCommand,
+        data: CommandData = None,
+        frame_number: int = 1,
+        use_variable_names=False,
+        filter_values=True
+    ) -> Dict[str, Any]:
+        command = self.get_command(command)
+
+        if not data:
+            data = {}
+        
+        return command.encode_dict(
+            data,
+            use_variable_names=use_variable_names,
+            filter_values=filter_values,
+        )

@@ -6,11 +6,10 @@ __all__ = [
 import logging
 import asyncio
 from json import JSONDecodeError, loads
-from typing import Dict, Optional, Tuple, NoReturn, List, Iterable
+from typing import Dict, Optional, Tuple, NoReturn, List, Iterable, TYPE_CHECKING
 from datetime import datetime, timedelta
 
 from aiohttp import ClientSession
-from hekrapi import Protocol
 
 from .const import DEFAULT_APPLICATION_ID, DEFAULT_APPLICATION_NAME, DEFAULT_APPLICATION_VERSION, \
     DEFAULT_APPLICATION_TYPE, DEFAULT_OS_VERSION, DEFAULT_TIMEOUT
@@ -18,6 +17,9 @@ from .device import Device, CloudConnector
 from .exceptions import AccountUnauthenticatedException, AccountDevicesUpdateFailedException, \
     HekrAPIException, HekrValueError, AuthenticationFailedException, HekrTypeError, HekrResponseStatusError, \
     RefreshTokenExpiredException, AccessTokenExpiredException
+
+if TYPE_CHECKING:
+    from .protocol import BaseProtocol
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -326,7 +328,7 @@ class Account:
                 connector.update_token(self.__access_token)
 
     async def update_devices(self, devices_info: Optional[Dict[str, dict]] = None,
-                             protocols: Optional[Iterable['Protocol']] = None,
+                             protocols: Optional[Iterable['BaseProtocol']] = None,
                              update_existing_device_protocols: bool = False,
                              with_timeout: float = DEFAULT_TIMEOUT) -> Dict[str, Device]:
         """

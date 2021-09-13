@@ -287,7 +287,8 @@ class _BaseConnector:
                 raise DeviceProtocolNotSetException(device=self)
 
             if response_code == 200:
-                data = hekr_device.protocol.decode(raw=data['params']['data']['raw'])
+                data = hekr_device.protocol.decode(data['params']['data'])
+
                 _LOGGER.debug('Command executed successfully on device %s'
                               if action == ACTION_COMMAND_RESPONSE else
                               'Received command request for device %s', self)
@@ -776,13 +777,13 @@ class Device:
 
         self.__last_frame_number = frame_number
 
-        raw = self.protocol.encode(
+        request_data = self.protocol.encode(
             data=data,
             command=command,
             frame_number=frame_number
         )
 
-        return await self.make_request(ACTION_COMMAND_REQUEST, {"data": {"raw": raw}})
+        return await self.make_request(ACTION_COMMAND_REQUEST, {"data": request_data})
 
     # device info-related accessors
     @property

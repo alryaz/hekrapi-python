@@ -5,7 +5,7 @@ from typing import Union, Any
 
 from ..argument import Argument, OptionalArgument
 from ..command import Command, FrameType
-from ..protocol import Protocol, TO_STR, TO_FLOAT, TO_BOOL, TO_SIGNED_FLOAT
+from ..protocol import RawProtocol, TO_STR, TO_FLOAT, TO_BOOL, TO_SIGNED_FLOAT
 
 __all__ = [
     "VoltageWarning",
@@ -42,7 +42,7 @@ class SwitchState(IntEnum):
     FAILURE = 2
 
 
-PROTOCOL = Protocol(
+PROTOCOL = RawProtocol(
     Command(0, FrameType.SEND, "queryDev", response_command_id=1),
     Command(1, FrameType.RECEIVE, "reportDev", arguments=[
         Argument("phase_count", int, 1, "type"),
