@@ -2,40 +2,49 @@
 # pylint: disable=too-many-arguments
 """Protocol class module for Hekr API"""
 __all__ = [
-    'RawProtocol',
-    'DictProtocol',
-    'BaseProtocol',
-    'TO_FLOAT',
-    'TO_BOOL',
-    'TO_STR',
-    'TO_SIGNED_FLOAT',
-    'signed_float_converter'
+    "RawProtocol",
+    "DictProtocol",
+    "BaseProtocol",
+    "TO_FLOAT",
+    "TO_BOOL",
+    "TO_STR",
+    "TO_SIGNED_FLOAT",
+    "signed_float_converter",
 ]
-from json import dumps as json_dumps
+
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Union, List, Dict, Optional, Callable, Mapping, Any
+from typing import Any, Callable, Dict, List, Mapping, Optional, TYPE_CHECKING, Union
 
 from .command import Command
 from .const import FRAME_START_IDENTIFICATION
-from .exceptions import CommandNotFoundException, HekrTypeError, HekrValueError, InvalidMessagePrefixException, \
-    InvalidMessageLengthException, InvalidMessageChecksumException, InvalidMessageFrameTypeException
-from .types import CommandData, AnyCommand, DecodeResult
+from .exceptions import (
+    CommandNotFoundException,
+    HekrTypeError,
+    InvalidDataMissingKeyException,
+    InvalidMessageChecksumException,
+    InvalidMessageFrameTypeException,
+    InvalidMessageLengthException,
+    InvalidMessagePrefixException,
+)
+from .types import AnyCommand, CommandData, DecodeResult
+
 
 if TYPE_CHECKING:
     from .device import Device
 
 
 def signed_float_converter(threshold, type_input=int, type_output=float):
-    """ Generates a signed float converter. """
+    """Generates a signed float converter."""
+
     def convert_input(value):
-        """ Adds negative value to threshold to restore original """
+        """Adds negative value to threshold to restore original"""
         value = type_input(value)
-        return threshold-value if value < 0 else value
+        return threshold - value if value < 0 else value
 
     def convert_output(value):
-        """ Inverts sign if original is equal to or greater than threshold """
+        """Inverts sign if original is equal to or greater than threshold"""
         value = type_output(value)
-        return value if value < threshold else threshold-value
+        return value if value < threshold else threshold - value
 
     return convert_input, convert_output
 
@@ -58,14 +67,20 @@ def remove_none(obj):
     elif isinstance(obj, dict):
         return type(obj)(
             (remove_none(k), remove_none(v))
-            for k, v in obj.items() if k is not None and v is not None
+            for k, v in obj.items()
+            if k is not None and v is not None
         )
     else:
         return obj
 
 
 class BaseProtocol(ABC):
-    def __init__(self, *args, compatibility_checker: Optional[Callable[['Device'], bool]] = None, name: Optional[str] = None):
+    def __init__(
+        self,
+        *args,
+        compatibility_checker: Optional[Callable[["Device"], bool]] = None,
+        name: Optional[str] = None,
+    ):
         """
         Protocol definition constructor.
 
@@ -77,7 +92,9 @@ class BaseProtocol(ABC):
         self.compatibility_checker = compatibility_checker
 
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__}:\"{self.name}\", {len(self.commands)} commands>"
+        return (
+            f'<{self.__class__.__name__}:"{self.name}", {len(self.commands)} commands>'
+        )
 
     def __str__(self) -> str:
         return repr(self)
@@ -105,14 +122,13 @@ class BaseProtocol(ABC):
             HekrTypeError: Raised when passed list contains elements of different type(s) than `list`
         """
         if not isinstance(value, list):
-            raise HekrTypeError(variable='commands', expected=list, got=type(value))
+            raise HekrTypeError(variable="commands", expected=list, got=type(value))
 
-        invalid_types = [
-            type(x) for x in value
-            if not isinstance(x, Command)
-        ]
+        invalid_types = [type(x) for x in value if not isinstance(x, Command)]
         if invalid_types:
-            raise HekrTypeError(variable='commands', expected=Command, got=invalid_types)
+            raise HekrTypeError(
+                variable="commands", expected=Command, got=invalid_types
+            )
 
         self.__commands = value
 
@@ -128,7 +144,7 @@ class BaseProtocol(ABC):
         """
         return self.get_command(key)
 
-    def is_device_compatible(self, device: 'Device') -> bool:
+    def is_device_compatible(self, device: "Device") -> bool:
         """
         Detects whether passed device is compatible with given protocol.
         :param device:
@@ -188,19 +204,20 @@ class BaseProtocol(ABC):
             return self.get_command_by_name(command)
 
         raise TypeError(
-            "Argument 'command' (type %s) does not evaluate to any supported command type" %
-            command)
+            "Argument 'command' (type %s) does not evaluate to any supported command type"
+            % command
+        )
 
     @abstractmethod
     def decode(
         self,
         data: Mapping[str, Any],
         use_variable_names: bool = False,
-        filter_values: bool = True
+        filter_values: bool = True,
     ) -> DecodeResult:
         """
         Decode response.
-        :param raw: Raw datagram
+        :param data: Input data
         :param use_variable_names: Use variable names as data keys
         :param filter_values: Apply filters to values
         :type: protocol: Protocol
@@ -213,7 +230,14 @@ class BaseProtocol(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def encode(self, command: AnyCommand, data: Mapping[str, Any], frame_number: int = 1, use_variable_names: bool = False, filter_values: bool = True) -> Dict[str, Any]:
+    def encode(
+        self,
+        command: AnyCommand,
+        data: Mapping[str, Any],
+        frame_number: int = 1,
+        use_variable_names: bool = False,
+        filter_values: bool = True,
+    ) -> Dict[str, Any]:
         """
         Encode data into request.
         :param command: Command object/ID/name
@@ -227,45 +251,53 @@ class BaseProtocol(ABC):
 
 
 class RawProtocol(BaseProtocol):
-    """ Protocol definition class """
+    """Protocol definition class"""
 
     def decode(
         self,
         data: Union[Mapping[str, Any], str, bytes, bytearray],
         use_variable_names: bool = False,
-        filter_values: bool = True
+        filter_values: bool = True,
     ) -> DecodeResult:
         if isinstance(data, Mapping):
             if "raw" not in data:
-                raise ValueError("mapping does not contain \"raw\" key")
-            return self.decode(data["raw"], use_variable_names=use_variable_names, filter_values=filter_values)
-        
-        if isinstance(raw, str):
-            decoded = bytearray.fromhex(raw)
-        elif isinstance(raw, bytes):
-            decoded = bytearray(raw)
-        elif isinstance(raw, bytearray):
-            decoded = raw
+                raise ValueError('mapping does not contain "raw" key')
+            return self.decode(
+                data["raw"],
+                use_variable_names=use_variable_names,
+                filter_values=filter_values,
+            )
+
+        if isinstance(data, str):
+            decoded = bytearray.fromhex(data)
+        elif isinstance(data, bytes):
+            decoded = bytearray(data)
+        elif isinstance(data, bytearray):
+            decoded = data
         else:
-            raise HekrTypeError(variable='raw', expected=[str, bytearray], got=type(raw))
+            raise HekrTypeError(
+                variable="raw",
+                expected=[str, bytearray],
+                got=type(data),
+            )
 
         if decoded[0] != FRAME_START_IDENTIFICATION:
-            raise InvalidMessagePrefixException(raw)
+            raise InvalidMessagePrefixException(data)
 
         frame_length = decoded[1]
         if frame_length != len(decoded):
-            raise InvalidMessageLengthException(raw)
+            raise InvalidMessageLengthException(data)
 
         checksum = decoded[-1]
         current_checksum = sum(decoded[:-1]) % 0x100
         if checksum != current_checksum:
-            raise InvalidMessageChecksumException(raw)
+            raise InvalidMessageChecksumException(data)
 
         frame_type = decoded[2]
         command_id = decoded[4]
         command = self.get_command_by_id(command_id)
         if frame_type != command.frame_type.value:
-            raise InvalidMessageFrameTypeException(raw)
+            raise InvalidMessageFrameTypeException(data)
 
         frame_number = decoded[3]
 
@@ -279,7 +311,7 @@ class RawProtocol(BaseProtocol):
         data: CommandData = None,
         frame_number: int = 1,
         use_variable_names: bool = False,
-        filter_values: bool = True
+        filter_values: bool = True,
     ) -> Dict[str, Any]:
 
         command = self.get_command(command)
@@ -290,7 +322,7 @@ class RawProtocol(BaseProtocol):
         encoded_command = command.encode_raw(
             data=data,
             use_variable_names=use_variable_names,
-            filter_values=filter_values
+            filter_values=filter_values,
         )
 
         raw = bytearray()
@@ -307,16 +339,13 @@ class RawProtocol(BaseProtocol):
 
 class DictProtocol(BaseProtocol):
     def decode(
-        self,
-        data: Mapping[str, Any],
-        use_variable_names=False,
-        filter_values=True
+        self, data: Mapping[str, Any], use_variable_names=False, filter_values=True
     ) -> DecodeResult:
         command_id = data.get("cmdId")
-        
+
         if command_id is None:
             raise InvalidDataMissingKeyException(data_key="cmdId")
-        
+
         command = self.get_command(int(command_id))
 
         data = command.decode_dict(
@@ -324,7 +353,7 @@ class DictProtocol(BaseProtocol):
             use_variable_names=use_variable_names,
             filter_values=filter_values,
         )
-        
+
         return command, data, -1
 
     def encode(
@@ -333,13 +362,13 @@ class DictProtocol(BaseProtocol):
         data: CommandData = None,
         frame_number: int = 1,
         use_variable_names=False,
-        filter_values=True
+        filter_values=True,
     ) -> Dict[str, Any]:
         command = self.get_command(command)
 
         if not data:
             data = {}
-        
+
         return command.encode_dict(
             data,
             use_variable_names=use_variable_names,
